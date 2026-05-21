@@ -18,7 +18,7 @@ Explore Salesforce Apex debug logs as a local interactive execution graph inside
 ## Install From Marketplace
 
 ```bash
-code --install-extension apex-debug-log-explorer.apex-debug-log-explorer
+code --install-extension penna-vibe-code-apps.apex-debug-log-explorer
 ```
 
 ## Install From VSIX

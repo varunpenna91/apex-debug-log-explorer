@@ -11,7 +11,7 @@ Official reference: [Publishing Extensions](https://code.visualstudio.com/api/wo
 
 ```json
 {
-  "publisher": "apex-debug-log-explorer",
+  "publisher": "penna-vibe-code-apps",
   "name": "apex-debug-log-explorer"
 }
 ```
@@ -28,7 +28,7 @@ Official reference: [Publishing Extensions](https://code.visualstudio.com/api/wo
 4. After it succeeds, verify:
 
 ```text
-https://marketplace.visualstudio.com/items?itemName=apex-debug-log-explorer.apex-debug-log-explorer
+https://marketplace.visualstudio.com/items?itemName=penna-vibe-code-apps.apex-debug-log-explorer
 ```
 
 ## Publish Locally

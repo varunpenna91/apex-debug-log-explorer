@@ -70,12 +70,12 @@ See `docs/packaging/desktop-installers.md` for the release packaging flow and si
 Install from Marketplace after publishing:
 
 ```bash
-code --install-extension apex-debug-log-explorer.apex-debug-log-explorer
+code --install-extension penna-vibe-code-apps.apex-debug-log-explorer
 ```
 
 Marketplace page:
 
-https://marketplace.visualstudio.com/items?itemName=apex-debug-log-explorer.apex-debug-log-explorer
+https://marketplace.visualstudio.com/items?itemName=penna-vibe-code-apps.apex-debug-log-explorer
 
 Build a local `.vsix` package:
 
