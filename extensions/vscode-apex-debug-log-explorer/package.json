@@ -1,8 +1,8 @@
 {
   "name": "apex-debug-log-explorer",
   "displayName": "Apex Debug Log Explorer",
-  "description": "Explore Salesforce Apex debug logs as a local interactive execution graph.",
-  "version": "0.1.3",
+  "description": "Explore Salesforce Apex debug logs with a local graph for Apex, triggers, Flow, DML, SOQL, async, callouts, email, and errors.",
+  "version": "0.1.4",
   "publisher": "penna-vibe-code-apps",
   "license": "MIT",
   "engines": {
@@ -17,10 +17,24 @@
     "salesforce",
     "apex",
     "debug log",
+    "debug logs",
+    "apex logs",
+    "apex debug",
     "soql",
     "dml",
-    "flow"
+    "flow",
+    "trigger",
+    "governor limits",
+    "salesforce logs"
   ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/varunpenna91/apex-debug-log-explorer.git"
+  },
+  "homepage": "https://github.com/varunpenna91/apex-debug-log-explorer",
+  "bugs": {
+    "url": "https://github.com/varunpenna91/apex-debug-log-explorer/issues"
+  },
   "activationEvents": [
     "onCommand:apexDebugLogExplorer.openLog",
     "onCommand:apexDebugLogExplorer.openCurrentFile"

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.4 - Marketplace Listing Detail
+
+- Expand the VS Code Marketplace README with product capabilities, screenshots, privacy notes, and right-click open flows.
+
 ## 0.1.3 - VS Code Sidebar Focus
 
 - Automatically collapse the VS Code sidebar when Apex Debug Log Explorer opens its webview.
