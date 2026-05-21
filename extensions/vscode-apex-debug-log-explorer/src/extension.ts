@@ -73,10 +73,19 @@ async function openLogUri(context: vscode.ExtensionContext, uri: vscode.Uri): Pr
     };
     const webviewPanel = ensurePanel(context);
     webviewPanel.reveal(vscode.ViewColumn.One);
+    void collapseWorkbenchSidebar();
     sendPendingLog(webviewPanel);
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unable to open the selected debug log.';
     vscode.window.showErrorMessage(`Apex Debug Log Explorer: ${message}`);
+  }
+}
+
+async function collapseWorkbenchSidebar(): Promise<void> {
+  try {
+    await vscode.commands.executeCommand('workbench.action.closeSidebar');
+  } catch {
+    // Older or web-hosted VS Code environments may not expose this command.
   }
 }
 

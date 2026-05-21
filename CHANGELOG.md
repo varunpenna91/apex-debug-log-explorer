@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.3 - VS Code Sidebar Focus
+
+- Automatically collapse the VS Code sidebar when Apex Debug Log Explorer opens its webview.
+
 ## 0.1.2 - VS Code Context Menu Fix
 
 - Add `Open with Apex Debug Log Explorer` to the editor right-click menu for open `.log` and `.txt` files.
