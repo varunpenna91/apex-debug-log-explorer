@@ -27,7 +27,10 @@ code --install-extension penna-vibe-code-apps.apex-debug-log-explorer
 2. Open VS Code.
 3. Run `Extensions: Install from VSIX...`.
 4. Select the downloaded `.vsix`.
-5. Open a Salesforce debug log and run `Open with Apex Debug Log Explorer`.
+5. Open a Salesforce debug `.log` or `.txt` file.
+6. Right-click inside the editor and choose `Open with Apex Debug Log Explorer`.
+7. You can also right-click the file in VS Code Explorer and choose `Open with Apex Debug Log Explorer`.
+8. Or run `Apex Debug Log Explorer: Open Log` from Command Palette.
 
 Command-line install:
 
