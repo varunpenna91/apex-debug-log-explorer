@@ -1,7 +1,7 @@
 {
   "name": "apex-debug-log-explorer",
   "private": true,
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "Local-first interactive Salesforce Apex debug log explorer for transaction graphs, DML, SOQL, Flow, async, email, callout, and error analysis.",
   "author": "Apex Debug Log Explorer contributors",
   "license": "MIT",
@@ -31,6 +31,7 @@
     "appId": "com.apexdebuglogexplorer.app",
     "productName": "Apex Debug Log Explorer",
     "artifactName": "apex-debug-log-explorer-${version}-${os}-${arch}.${ext}",
+    "icon": "build/icon.png",
     "directories": {
       "output": "release/desktop"
     },
@@ -41,12 +42,14 @@
     ],
     "mac": {
       "category": "public.app-category.developer-tools",
+      "icon": "build/icon.icns",
       "target": [
         "dmg"
       ],
       "identity": "-"
     },
     "win": {
+      "icon": "build/icon.ico",
       "target": [
         "nsis"
       ]
@@ -61,6 +64,7 @@
     },
     "linux": {
       "category": "Development",
+      "icon": "build/icon.png",
       "target": [
         "AppImage",
         "tar.gz"

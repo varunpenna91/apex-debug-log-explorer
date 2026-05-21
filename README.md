@@ -1,5 +1,9 @@
 # Apex Debug Log Explorer
 
+<p align="center">
+  <img src="docs/media/apex-debug-log-explorer-icon.png" alt="Apex Debug Log Explorer icon" width="96">
+</p>
+
 Apex Debug Log Explorer is a local-first desktop and VS Code tool for reading Salesforce Apex debug logs as an interactive execution graph instead of a flat wall of text.
 
 ![Apex Debug Log Explorer execution graph](docs/media/hero-execution-graph-dark.png)

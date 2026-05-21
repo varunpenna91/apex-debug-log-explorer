@@ -64,6 +64,7 @@ import {
 } from 'lucide-react';
 import type { LogSummary, NodeKind, ParseResult, StoryNode, WorkerParseResponse } from './lib/types';
 import { parseSalesforceLog } from './lib/salesforceLogParser';
+import appIconUrl from './assets/app-icon.png';
 
 const IMPORTANT_KINDS = new Set<NodeKind>([
   'apex',
@@ -1450,7 +1451,7 @@ function App() {
       <header className="topbar">
         <div className="brand" data-tour-id="brand">
           <div className="brand-mark">
-            <Waypoints size={19} />
+            <img src={appIconUrl} alt="" aria-hidden="true" />
           </div>
           <div>
             <h1>Apex Debug Log Explorer</h1>
@@ -6519,7 +6520,7 @@ function LandingPage({ onUploadClick }: { onUploadClick: () => void }) {
     <div className="landing-container">
       <div className="landing-hero">
         <div className="landing-logo">
-          <Waypoints size={48} className="logo-icon" />
+          <img src={appIconUrl} alt="" aria-hidden="true" />
         </div>
         <h2>Apex Debug Log Explorer</h2>
         <p className="landing-subtitle">

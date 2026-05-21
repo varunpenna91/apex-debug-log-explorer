@@ -4,6 +4,9 @@ This folder stores screenshots and short demo captures used by the README, GitHu
 
 Expected assets:
 
+- `apex-debug-log-explorer-icon.png`
+- `apex-debug-log-explorer-icon-source.png`
+- `apex-debug-log-explorer-icon-concepts.png`
 - `hero-execution-graph-dark.png`
 - `hero-execution-graph-light.png`
 - `soql-index-group-focus.png`

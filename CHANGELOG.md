@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.7 - Brand Icon
+
+- Add the Apex Debug Log Explorer brand icon to the desktop app, VS Code extension, README, and release media.
+- Configure native Electron icons for macOS, Windows, and Linux packaging.
+- Update Marketplace README image cache keys for the new branded release.
+
 ## 0.1.6 - Marketplace Screenshot Cache Bust
 
 - Add versioned screenshot URLs so VS Code and Marketplace stop showing cached pre-sanitized images.

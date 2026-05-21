@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.7
+
+- Adds the Apex Debug Log Explorer brand icon to the Marketplace listing and bundled webview documentation.
+
 ## 0.1.0
 
 - Initial VS Code extension package for Apex Debug Log Explorer.
