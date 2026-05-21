@@ -98,7 +98,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          NOTES_FILE="docs/releases/${VERSION}.md"
+          NOTES_FILE="docs/releases/v${VERSION}.md"
           if [ ! -f "$NOTES_FILE" ]; then
             NOTES_FILE="docs/releases/v0.1.0.md"
           fi
