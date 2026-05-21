@@ -2,7 +2,7 @@
   "name": "apex-debug-log-explorer",
   "displayName": "Apex Debug Log Explorer",
   "description": "Explore Salesforce Apex debug logs as a local interactive execution graph.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "publisher": "penna-vibe-code-apps",
   "license": "MIT",
   "engines": {

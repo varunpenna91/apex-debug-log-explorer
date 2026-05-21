@@ -1,7 +1,7 @@
 {
   "name": "apex-debug-log-explorer",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Local-first interactive Salesforce Apex debug log explorer for transaction graphs, DML, SOQL, Flow, async, email, callout, and error analysis.",
   "author": "Apex Debug Log Explorer contributors",
   "license": "MIT",
@@ -44,7 +44,7 @@
       "target": [
         "dmg"
       ],
-      "identity": null
+      "identity": "-"
     },
     "win": {
       "target": [

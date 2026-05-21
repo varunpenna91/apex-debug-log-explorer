@@ -38,7 +38,7 @@ For Windows, prefer the GitHub Release workflow because it builds the installer 
 
 ## GitHub Release Flow
 
-1. Update `CHANGELOG.md` and `docs/releases/v0.1.0.md`.
+1. Update `CHANGELOG.md` and `docs/releases/v0.1.1.md`.
 2. Confirm the app builds:
 
 ```bash
@@ -49,8 +49,8 @@ npm run vscode:package
 3. Create and push a version tag:
 
 ```bash
-git tag v0.1.0
-git push origin v0.1.0
+git tag v0.1.1
+git push origin v0.1.1
 ```
 
 4. GitHub Actions runs `.github/workflows/release.yml`.
@@ -58,10 +58,10 @@ git push origin v0.1.0
 
 ## Signing Notes
 
-The initial release artifacts are unsigned.
+The private-preview macOS artifacts are ad-hoc signed so Electron can launch reliably on Apple Silicon and Intel Macs. They are not Apple-notarized yet.
 
-- macOS users may see a Gatekeeper warning.
+- macOS users may still see an unidentified developer or quarantine warning.
 - Windows users may see a Microsoft Defender SmartScreen warning.
 - Teams that require managed distribution should sign and notarize the macOS build and code-sign the Windows installer before broad rollout.
 
-Unsigned builds are acceptable for early internal validation and GitHub Release testing, but signed builds are recommended before asking a wider team to install the desktop app.
+Ad-hoc signed builds are acceptable for early internal validation and GitHub Release testing, but Developer ID signing plus notarization is recommended before asking a wider team to install the desktop app.

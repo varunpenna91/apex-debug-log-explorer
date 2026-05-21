@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.1 - Desktop Packaging Fix
+
+- Ad-hoc sign macOS desktop builds to avoid Electron launch failures on private DMG installs.
+- Updated GitHub Release packaging notes for macOS quarantine and signing expectations.
+
 ## 0.1.0 - Initial Public Preview
 
 - Branded the product as Apex Debug Log Explorer.

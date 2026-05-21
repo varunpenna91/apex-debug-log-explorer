@@ -97,8 +97,13 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          NOTES_FILE="docs/releases/${VERSION}.md"
+          if [ ! -f "$NOTES_FILE" ]; then
+            NOTES_FILE="docs/releases/v0.1.0.md"
+          fi
           sed "s#../media/#https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/${GITHUB_REF_NAME}/docs/media/#g" \
-            docs/releases/v0.1.0.md > release-notes.md
+            "$NOTES_FILE" > release-notes.md
           gh release create "$GITHUB_REF_NAME" \
             --title "Apex Debug Log Explorer $GITHUB_REF_NAME" \
             --notes-file release-notes.md

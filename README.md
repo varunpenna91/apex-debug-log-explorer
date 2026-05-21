@@ -61,7 +61,7 @@ Installers are written to `release/desktop/`.
 - Windows: `npm run package:win` creates an NSIS `.exe` installer. For public release builds, use the GitHub Release workflow so the Windows installer is built on a Windows runner.
 - Linux: `npm run package:linux` is available for source users, but the initial public release focuses on macOS and Windows installers.
 
-Unsigned macOS builds may show a Gatekeeper warning. Unsigned Windows builds may show Microsoft Defender SmartScreen until the app is code signed and has reputation.
+macOS builds are ad-hoc signed for private distribution. They are not Apple-notarized yet, so macOS may still show an unidentified developer or quarantine warning. Windows builds may show Microsoft Defender SmartScreen until the app is code signed and has reputation.
 
 See `docs/packaging/desktop-installers.md` for the release packaging flow and signing notes.
 
@@ -97,7 +97,7 @@ Install from VSIX:
 Command-line install:
 
 ```bash
-code --install-extension release/apex-debug-log-explorer-0.1.0.vsix
+code --install-extension release/apex-debug-log-explorer-0.1.1.vsix
 ```
 
 After installation, right-click a `.log` or `.txt` file and choose `Open with Apex Debug Log Explorer`, or run `Apex Debug Log Explorer: Open Log` from Command Palette.
@@ -111,11 +111,11 @@ See `docs/publishing/vscode-marketplace.md` for publisher setup and Marketplace 
 3. Create a version tag:
 
 ```bash
-git tag v0.1.0
-git push origin v0.1.0
+git tag v0.1.1
+git push origin v0.1.1
 ```
 
-The release workflow builds desktop artifacts and the VS Code `.vsix`, then creates a GitHub Release using `docs/releases/v0.1.0.md`.
+The release workflow builds desktop artifacts and the VS Code `.vsix`, then creates a GitHub Release using `docs/releases/v0.1.1.md`.
 
 The release artifacts include:
 

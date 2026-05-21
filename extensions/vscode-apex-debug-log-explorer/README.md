@@ -32,7 +32,7 @@ code --install-extension penna-vibe-code-apps.apex-debug-log-explorer
 Command-line install:
 
 ```bash
-code --install-extension apex-debug-log-explorer-0.1.0.vsix
+code --install-extension apex-debug-log-explorer-0.1.1.vsix
 ```
 
 ## Privacy
