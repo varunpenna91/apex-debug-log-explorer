@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.5 - Sanitized Public Screenshots
+
+- Replace README and VS Code Marketplace screenshots with sanitized captures from a masked Salesforce debug log.
+- Add a reusable media-log sanitizer for future public screenshots.
+
 ## 0.1.4 - Marketplace Listing Detail
 
 - Expand the VS Code Marketplace README with product capabilities, screenshots, privacy notes, and right-click open flows.

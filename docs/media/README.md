@@ -12,4 +12,10 @@ Expected assets:
 - `flow-interview-elements.png`
 - Optional: `apex-debug-log-explorer-demo.gif` or `apex-debug-log-explorer-demo.mp4`
 
-Refresh these before publishing a release so the screenshots match the shipped UI.
+Refresh these before publishing a release so the screenshots match the shipped UI. Public screenshots must be captured from sanitized logs only. Use:
+
+```bash
+node scripts/sanitize-debug-log-for-media.mjs /path/to/source.log /tmp/sanitized-apex-debug.log
+```
+
+Do not commit raw customer, company, or org debug logs.
