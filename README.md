@@ -1,6 +1,6 @@
 # Apex Debug Log Explorer
 
-Apex Debug Log Explorer is a local-first desktop and webview tool for reading Salesforce Apex debug logs as an interactive execution graph instead of a flat wall of text.
+Apex Debug Log Explorer is a local-first desktop and VS Code tool for reading Salesforce Apex debug logs as an interactive execution graph instead of a flat wall of text.
 
 ![Apex Debug Log Explorer execution graph](docs/media/hero-execution-graph-dark.png)
 
@@ -10,6 +10,7 @@ Apex Debug Log Explorer is a local-first desktop and webview tool for reading Sa
 - Shows Apex, triggers, Flow interviews, Flow elements, DML, SOQL, errors, Async Apex, email sends, and callouts in context.
 - Lets you click a node to inspect downstream execution, caller context, raw evidence, governor metrics, and exception details.
 - Groups DML, SOQL, errors, email sends, and callouts into left-panel indexes that jump back to the exact graph node where they happened.
+- Highlights repeated SOQL and DML patterns without flooding the graph with hundreds of duplicate nodes.
 - Keeps parsing local to your machine. Logs are not uploaded to Salesforce, OpenAI, or any other service.
 
 ## How It Differs From Existing Tools
@@ -28,6 +29,40 @@ Compared with Apex Log Analyzer-style tools recommended in the Salesforce develo
 - local-first desktop and VS Code workflows
 
 Compared with Apex Replay Debugger, this is not a breakpoint debugger. It is an after-the-fact transaction explorer for debug logs that already exist.
+
+## Core Views
+
+### Execution Graph
+
+Navigate the transaction visually. Expand downstream execution from the node you care about and keep context as you move through Apex, triggers, Flow, async work, DML, SOQL, and exceptions.
+
+![Execution graph light mode](docs/media/hero-execution-graph-light.png)
+
+### SOQL Index
+
+Find repeated queries, group identical SOQL, and jump back to every execution node where that query happened.
+
+![SOQL grouped index](docs/media/soql-index-group-focus.png)
+
+### DML Downstream
+
+See which DML operation caused triggers, Flow interviews, validation, async work, or downstream automation.
+
+![DML downstream graph](docs/media/dml-downstream-graph.png)
+
+### Error Path
+
+Open an error from the index, focus the exact node where it happened, and inspect exception details with raw evidence.
+
+![Error inspector](docs/media/error-path-inspector.png)
+
+### Flow Interviews And Elements
+
+Separate the actual Flow interview from the individual Flow elements inside it, so the graph does not imply that runtime wrapper lines are meaningful business steps.
+
+![Flow interview and elements](docs/media/flow-interview-elements.png)
+
+All public screenshots are generated from sanitized debug logs using placeholder names such as `ApexClass`, `CustomObject`, `FlowItem`, and `BusinessToken`.
 
 ## Run From Source
 
