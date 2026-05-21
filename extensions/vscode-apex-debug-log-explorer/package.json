@@ -1,0 +1,64 @@
+{
+  "name": "apex-debug-log-explorer",
+  "displayName": "Apex Debug Log Explorer",
+  "description": "Explore Salesforce Apex debug logs as a local interactive execution graph.",
+  "version": "0.1.0",
+  "publisher": "apex-debug-log-explorer",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.96.0"
+  },
+  "categories": [
+    "Visualization",
+    "Debuggers",
+    "Other"
+  ],
+  "keywords": [
+    "salesforce",
+    "apex",
+    "debug log",
+    "soql",
+    "dml",
+    "flow"
+  ],
+  "activationEvents": [
+    "onCommand:apexDebugLogExplorer.openLog",
+    "onCommand:apexDebugLogExplorer.openCurrentFile"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "apexDebugLogExplorer.openLog",
+        "title": "Apex Debug Log Explorer: Open Log"
+      },
+      {
+        "command": "apexDebugLogExplorer.openCurrentFile",
+        "title": "Apex Debug Log Explorer: Open Current File"
+      }
+    ],
+    "menus": {
+      "explorer/context": [
+        {
+          "command": "apexDebugLogExplorer.openCurrentFile",
+          "when": "resourceExtname == .log || resourceExtname == .txt",
+          "group": "navigation@50"
+        }
+      ],
+      "editor/title/context": [
+        {
+          "command": "apexDebugLogExplorer.openCurrentFile",
+          "when": "resourceExtname == .log || resourceExtname == .txt",
+          "group": "navigation@50"
+        }
+      ]
+    }
+  },
+  "files": [
+    "dist",
+    "webview-dist",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ]
+}

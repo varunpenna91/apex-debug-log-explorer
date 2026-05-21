@@ -1,0 +1,105 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  vscode:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Security audit
+        run: npm run security:audit
+
+      - name: Package VS Code extension
+        run: npm run vscode:package
+
+      - name: Upload VS Code artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: vscode-extension
+          path: release/*.vsix
+
+  desktop:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            script: package:mac:x64
+            artifact: desktop-macos-x64
+            artifact_path: release/desktop/*.dmg
+          - os: windows-latest
+            script: package:win:x64
+            artifact: desktop-windows-x64
+            artifact_path: release/desktop/*.exe
+          - os: macos-latest
+            script: package:mac:arm64
+            artifact: desktop-macos-arm64
+            artifact_path: release/desktop/*.dmg
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Security audit
+        run: npm run security:audit
+
+      - name: Package desktop app
+        run: npm run ${{ matrix.script }}
+
+      - name: Upload desktop artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.artifact_path }}
+
+  publish:
+    needs:
+      - vscode
+      - desktop
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sed "s#../media/#https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/${GITHUB_REF_NAME}/docs/media/#g" \
+            docs/releases/v0.1.0.md > release-notes.md
+          gh release create "$GITHUB_REF_NAME" \
+            --title "Apex Debug Log Explorer $GITHUB_REF_NAME" \
+            --notes-file release-notes.md
+          find release-artifacts -type f -print0 | xargs -0 gh release upload "$GITHUB_REF_NAME" --clobber

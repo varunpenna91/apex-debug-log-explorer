@@ -1,0 +1,13 @@
+.DS_Store
+.chrome-debug/
+.vscode-test/
+DebugLogAnalyzerV2/
+node_modules/
+dist/
+release/
+*.log
+*.vsix
+*.tsbuildinfo
+
+extensions/vscode-apex-debug-log-explorer/dist/
+extensions/vscode-apex-debug-log-explorer/webview-dist/
