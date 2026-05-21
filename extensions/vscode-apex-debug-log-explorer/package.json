@@ -2,7 +2,7 @@
   "name": "apex-debug-log-explorer",
   "displayName": "Apex Debug Log Explorer",
   "description": "Explore Salesforce Apex debug logs as a local interactive execution graph.",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "publisher": "penna-vibe-code-apps",
   "license": "MIT",
   "engines": {
@@ -34,10 +34,17 @@
       },
       {
         "command": "apexDebugLogExplorer.openCurrentFile",
-        "title": "Apex Debug Log Explorer: Open Current File"
+        "title": "Open with Apex Debug Log Explorer"
       }
     ],
     "menus": {
+      "editor/context": [
+        {
+          "command": "apexDebugLogExplorer.openCurrentFile",
+          "when": "resourceExtname == .log || resourceExtname == .txt",
+          "group": "navigation@50"
+        }
+      ],
       "explorer/context": [
         {
           "command": "apexDebugLogExplorer.openCurrentFile",

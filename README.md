@@ -92,7 +92,7 @@ Install from VSIX:
 4. Run `Extensions: Install from VSIX...`.
 5. Select the `.vsix`.
 6. Open a Salesforce debug `.log` file.
-7. Run `Apex Debug Log Explorer: Open Current File`.
+7. Run `Open with Apex Debug Log Explorer`.
 
 Command-line install:
 
@@ -100,7 +100,7 @@ Command-line install:
 code --install-extension release/apex-debug-log-explorer-0.1.1.vsix
 ```
 
-After installation, right-click a `.log` or `.txt` file and choose `Open with Apex Debug Log Explorer`, or run `Apex Debug Log Explorer: Open Log` from Command Palette.
+After installation, right-click a `.log` or `.txt` file in Explorer, or right-click inside an open `.log`/`.txt` editor, and choose `Open with Apex Debug Log Explorer`. You can also run `Apex Debug Log Explorer: Open Log` from Command Palette.
 
 See `docs/publishing/vscode-marketplace.md` for publisher setup and Marketplace release steps.
 

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.2 - VS Code Context Menu Fix
+
+- Add `Open with Apex Debug Log Explorer` to the editor right-click menu for open `.log` and `.txt` files.
+- Rename the current-file command so the context menu reads like a normal VS Code file action.
+
 ## 0.1.1 - Desktop Packaging Fix
 
 - Ad-hoc sign macOS desktop builds to avoid Electron launch failures on private DMG installs.

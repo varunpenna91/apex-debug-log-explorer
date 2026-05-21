@@ -13,7 +13,7 @@ Explore Salesforce Apex debug logs as a local interactive execution graph inside
 ## Commands
 
 - `Apex Debug Log Explorer: Open Log`
-- `Apex Debug Log Explorer: Open Current File`
+- `Open with Apex Debug Log Explorer`
 
 ## Install From Marketplace
 
@@ -27,7 +27,7 @@ code --install-extension penna-vibe-code-apps.apex-debug-log-explorer
 2. Open VS Code.
 3. Run `Extensions: Install from VSIX...`.
 4. Select the downloaded `.vsix`.
-5. Open a Salesforce debug log and run `Apex Debug Log Explorer: Open Current File`.
+5. Open a Salesforce debug log and run `Open with Apex Debug Log Explorer`.
 
 Command-line install:
 
@@ -38,6 +38,12 @@ code --install-extension apex-debug-log-explorer-0.1.1.vsix
 ## Privacy
 
 The extension reads local files and renders the bundled webview locally. It does not upload debug log content.
+
+## Open A Log
+
+- Right-click a `.log` or `.txt` file in Explorer and choose `Open with Apex Debug Log Explorer`.
+- Right-click inside an open `.log` or `.txt` editor and choose `Open with Apex Debug Log Explorer`.
+- Or run `Apex Debug Log Explorer: Open Log` from Command Palette.
 
 ## Notes
 
