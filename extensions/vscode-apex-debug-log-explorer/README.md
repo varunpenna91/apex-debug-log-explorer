@@ -2,7 +2,7 @@
 
 Explore Salesforce Apex debug logs as an interactive execution graph inside VS Code. The extension is local-first: it reads the log file from your machine, renders the bundled graph experience in a VS Code webview, and does not upload debug log content.
 
-![Apex Debug Log Explorer execution graph](https://raw.githubusercontent.com/varunpenna91/apex-debug-log-explorer/main/docs/media/hero-execution-graph-dark.png)
+![Apex Debug Log Explorer execution graph](https://raw.githubusercontent.com/varunpenna91/apex-debug-log-explorer/main/docs/media/hero-execution-graph-dark.png?v=0.1.6)
 
 ## What It Does
 
@@ -36,31 +36,31 @@ Compared with Apex Replay Debugger, this is not a breakpoint debugger. It is an 
 
 Navigate the transaction visually. Expand downstream execution from the node you care about and keep context as you move through Apex, triggers, Flow, async work, DML, SOQL, and exceptions.
 
-![Execution graph light mode](https://raw.githubusercontent.com/varunpenna91/apex-debug-log-explorer/main/docs/media/hero-execution-graph-light.png)
+![Execution graph light mode](https://raw.githubusercontent.com/varunpenna91/apex-debug-log-explorer/main/docs/media/hero-execution-graph-light.png?v=0.1.6)
 
 ### SOQL Index
 
 Find repeated queries, group identical SOQL, and jump back to every execution node where that query happened.
 
-![SOQL grouped index](https://raw.githubusercontent.com/varunpenna91/apex-debug-log-explorer/main/docs/media/soql-index-group-focus.png)
+![SOQL grouped index](https://raw.githubusercontent.com/varunpenna91/apex-debug-log-explorer/main/docs/media/soql-index-group-focus.png?v=0.1.6)
 
 ### DML Downstream
 
 See which DML operation caused triggers, Flow interviews, validation, async work, or downstream automation.
 
-![DML downstream graph](https://raw.githubusercontent.com/varunpenna91/apex-debug-log-explorer/main/docs/media/dml-downstream-graph.png)
+![DML downstream graph](https://raw.githubusercontent.com/varunpenna91/apex-debug-log-explorer/main/docs/media/dml-downstream-graph.png?v=0.1.6)
 
 ### Error Path
 
 Open an error from the index, focus the exact node where it happened, and inspect exception details with raw evidence.
 
-![Error inspector](https://raw.githubusercontent.com/varunpenna91/apex-debug-log-explorer/main/docs/media/error-path-inspector.png)
+![Error inspector](https://raw.githubusercontent.com/varunpenna91/apex-debug-log-explorer/main/docs/media/error-path-inspector.png?v=0.1.6)
 
 ### Flow Interviews And Elements
 
 Separate the actual Flow interview from the individual Flow elements inside it, so the graph does not imply that runtime wrapper lines are meaningful business steps.
 
-![Flow interview and elements](https://raw.githubusercontent.com/varunpenna91/apex-debug-log-explorer/main/docs/media/flow-interview-elements.png)
+![Flow interview and elements](https://raw.githubusercontent.com/varunpenna91/apex-debug-log-explorer/main/docs/media/flow-interview-elements.png?v=0.1.6)
 
 ## Open A Log
 

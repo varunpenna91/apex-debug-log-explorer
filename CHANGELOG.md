@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.6 - Marketplace Screenshot Cache Bust
+
+- Add versioned screenshot URLs so VS Code and Marketplace stop showing cached pre-sanitized images.
+
 ## 0.1.5 - Sanitized Public Screenshots
 
 - Replace README and VS Code Marketplace screenshots with sanitized captures from a masked Salesforce debug log.
