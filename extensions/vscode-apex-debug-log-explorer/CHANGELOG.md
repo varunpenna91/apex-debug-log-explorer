@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.8
+
+- Removes the decorative icon image from the Marketplace overview while keeping it as the extension icon.
+
 ## 0.1.7
 
 - Adds the Apex Debug Log Explorer brand icon to the Marketplace listing and bundled webview documentation.

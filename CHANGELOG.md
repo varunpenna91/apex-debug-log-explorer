@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.8 - Marketplace Overview Cleanup
+
+- Remove the decorative icon image from the GitHub README and VS Code Marketplace overview.
+- Keep the branded icon as the desktop app icon and VS Code extension icon.
+
 ## 0.1.7 - Brand Icon
 
 - Add the Apex Debug Log Explorer brand icon to the desktop app, VS Code extension, README, and release media.
