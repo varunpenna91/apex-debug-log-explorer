@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.9
+
+- Collapses Salesforce `SLA` system code unit wrappers out of the graph so they do not appear as empty story nodes.
+
 ## 0.1.8
 
 - Removes the decorative icon image from the Marketplace overview while keeping it as the extension icon.

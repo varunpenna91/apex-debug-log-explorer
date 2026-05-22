@@ -312,6 +312,10 @@ export function parseSalesforceLog(text: string): ParseResult {
     switch (eventType) {
       case 'CODE_UNIT_STARTED': {
         const rawName = pickCodeUnitName(fields);
+        if (shouldCollapseSystemCodeUnit(rawName)) {
+          skippedCodeUnitFinishDepths.push(codeUnitStack.length);
+          break;
+        }
         const apexActionWrapper = parseApexActionName(rawName);
         if (apexActionWrapper && shouldSkipApexActionWrapper(rawName, rawLines, index)) {
           pendingApexActionWrapper = {
@@ -1959,6 +1963,10 @@ function pickCodeUnitName(fields: string[]): string {
     return fields[2];
   }
   return fields[1] ?? fields[0] ?? 'Code unit';
+}
+
+function shouldCollapseSystemCodeUnit(rawName: string): boolean {
+  return rawName.trim().toUpperCase() === 'SLA';
 }
 
 function shouldSkipApexActionWrapper(rawName: string, rawLines: string[], index: number): boolean {

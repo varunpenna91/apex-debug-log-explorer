@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.9 - Collapse SLA System Nodes
+
+- Collapse Salesforce `SLA` system code units out of the execution graph when they only represent entitlement/milestone processing wrappers.
+- Keep the surrounding raw evidence available on the owning Case DML or automation context.
+
 ## 0.1.8 - Marketplace Overview Cleanup
 
 - Remove the decorative icon image from the GitHub README and VS Code Marketplace overview.
