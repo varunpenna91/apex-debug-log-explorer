@@ -76,6 +76,7 @@ interface PendingFlowRecordMutation {
 
 interface PendingFlowCreate {
   parentId: string;
+  groupId: number;
   lineNumber: number;
   ns: number;
   raw: string;
@@ -282,6 +283,9 @@ export function parseSalesforceLog(text: string): ParseResult {
   let pendingSoql: PendingSoql | undefined;
   let pendingApexActionWrapper: { className: string; methodName: string; lineNumber: number; rawName: string } | undefined;
   const pendingFlowCreates: PendingFlowCreate[] = [];
+  const flowInterviewGroupByKey = new Map<string, string>();
+  let flowCreateGroupSequence = 0;
+  let activeFlowCreateGroupId = 0;
   let pendingFlowRecordMutation: PendingFlowRecordMutation | undefined;
   let latestEmailNodeId: string | undefined;
   let latestValidationRule: ValidationRuleContext | undefined;
@@ -788,8 +792,11 @@ export function parseSalesforceLog(text: string): ParseResult {
         break;
       }
       case 'FLOW_CREATE_INTERVIEW_BEGIN': {
+        activeFlowCreateGroupId = flowCreateGroupSequence + 1;
+        flowCreateGroupSequence = activeFlowCreateGroupId;
         pendingFlowCreates.push({
           parentId: currentCodeUnitId(codeUnitStack),
+          groupId: activeFlowCreateGroupId,
           lineNumber,
           ns,
           raw: fields.join('|'),
@@ -804,6 +811,20 @@ export function parseSalesforceLog(text: string): ParseResult {
         const flowName = fields[1] ?? 'Flow interview';
         const create = pendingFlowCreates.shift();
         const parentId = create?.parentId ?? currentCodeUnitId(codeUnitStack);
+        const groupKey = flowInterviewGroupKey(parentId, create?.groupId ?? activeFlowCreateGroupId, flowName);
+        const existing = nodeById.get(flowInterviewGroupByKey.get(groupKey) ?? '');
+        if (existing?.kind === 'flow') {
+          const interviewCount = Number(existing.metrics.interviewCount ?? existing.loopMultiplier ?? 1) + 1;
+          existing.loopMultiplier = interviewCount;
+          existing.metrics.interviewCount = interviewCount;
+          existing.metrics.interviewIds = appendDelimitedMetric(existing.metrics.interviewIds, interviewId);
+          existing.detail = [existing.detail, `FLOW_CREATE_INTERVIEW_END|${fields.join('|')}`].filter(Boolean).join('\n');
+          existing.lineEnd = Math.max(existing.lineEnd, lineNumber);
+          existing.endNs = Math.max(existing.endNs ?? existing.startNs, ns);
+          existing.durationMs = durationMs(existing.startNs, existing.endNs);
+          flowByInterview.set(interviewId, existing.id);
+          break;
+        }
         const node = addNode('flow', flowName, create?.lineNumber ?? lineNumber, create?.ns ?? ns, parentId, {
           subtitle: 'Flow interview',
           detail: [
@@ -812,6 +833,8 @@ export function parseSalesforceLog(text: string): ParseResult {
           ].filter(Boolean).join('\n'),
           metrics: {
             interviewId,
+            interviewCount: 1,
+            interviewIds: interviewId,
             flowApiName: flowName,
             ...(create?.flowDefinitionId ? { flowDefinitionId: create.flowDefinitionId } : {}),
             ...(create?.flowVersionId ? { flowVersionId: create.flowVersionId } : {}),
@@ -819,6 +842,7 @@ export function parseSalesforceLog(text: string): ParseResult {
           }
         });
         node.lineEnd = Math.max(node.lineEnd, lineNumber);
+        flowInterviewGroupByKey.set(groupKey, node.id);
         flowByInterview.set(interviewId, node.id);
         break;
       }
@@ -1138,7 +1162,9 @@ export function parseSalesforceLog(text: string): ParseResult {
     soqlCount,
     codeUnitCount: nodes.filter((node) => ['apex', 'trigger', 'flowRuntime', 'validation', 'workflow', 'async', 'codeUnit'].includes(node.kind)).length,
     triggerCount: nodes.filter((node) => node.kind === 'trigger').length,
-    flowCount: nodes.filter((node) => node.kind === 'flow' && node.metrics.flowApiName).length,
+    flowCount: nodes
+      .filter((node) => node.kind === 'flow' && node.metrics.flowApiName)
+      .reduce((total, node) => total + Math.max(1, Number(node.metrics.interviewCount ?? 1) || 1), 0),
     exceptionCount: nodes.filter((node) => node.kind === 'exception').length,
     collapsedNoiseCount,
     noiseGroups: topGroups(eventCounts, NOISY_EVENTS),
@@ -1963,6 +1989,15 @@ function pickCodeUnitName(fields: string[]): string {
     return fields[2];
   }
   return fields[1] ?? fields[0] ?? 'Code unit';
+}
+
+function flowInterviewGroupKey(parentId: string, groupId: number, flowName: string): string {
+  return `${parentId}|${groupId}|${flowName.trim().toLowerCase()}`;
+}
+
+function appendDelimitedMetric(value: unknown, nextValue: string): string {
+  const existing = typeof value === 'string' && value.trim() ? value.trim() : '';
+  return existing ? `${existing}, ${nextValue}` : nextValue;
 }
 
 function shouldCollapseSystemCodeUnit(rawName: string): boolean {

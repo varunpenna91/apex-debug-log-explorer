@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.10
+
+- Groups repeated bulk Flow interviews from the same record-triggered Flow so high-volume batch logs are readable.
+- Expands graph nodes on first click and collapses the same revealed branch on the next click.
+- Keeps sibling Flow interviews visible when exploring Flow elements under a DML-triggered branch.
+- Stabilizes double-click behavior so expand/collapse does not immediately reverse itself.
+
 ## 0.1.9
 
 - Collapses Salesforce `SLA` system code unit wrappers out of the graph so they do not appear as empty story nodes.

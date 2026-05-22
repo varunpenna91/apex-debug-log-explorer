@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.10 - Group Bulk Flow Interviews
+
+- Group repeated bulk Flow interviews from the same record-triggered Flow into one graph node with an interview count.
+- Keep the transaction summary counting the actual number of Salesforce Flow interviews emitted in the log.
+- Allow graph nodes to expand on first click and collapse their revealed branch on the next click without losing sibling context.
+- Keep sibling Flow interviews visible when expanding Flow elements under a DML-triggered automation branch.
+- Make double-click behavior stable so it does not immediately undo the intended expand/collapse state.
+
 ## 0.1.9 - Collapse SLA System Nodes
 
 - Collapse Salesforce `SLA` system code units out of the execution graph when they only represent entitlement/milestone processing wrappers.

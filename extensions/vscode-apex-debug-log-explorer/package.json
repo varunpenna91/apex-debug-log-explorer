@@ -2,7 +2,7 @@
   "name": "apex-debug-log-explorer",
   "displayName": "Apex Debug Log Explorer",
   "description": "Explore Salesforce Apex debug logs with a local graph for Apex, triggers, Flow, DML, SOQL, async, callouts, email, and errors.",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "publisher": "penna-vibe-code-apps",
   "icon": "media/icon.png",
   "license": "MIT",

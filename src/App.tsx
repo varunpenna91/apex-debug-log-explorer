@@ -160,6 +160,7 @@ const LIGHT_DML_TONE_STYLE: Record<DmlTone, { color: string; bg: string }> = {
 type GraphNodeData = {
   storyNode: StoryNode;
   selected: boolean;
+  expanded: boolean;
   childCount: number;
   executionOrder?: number;
   siblingOrder?: number;
@@ -215,6 +216,7 @@ interface FlowContext {
   flowApiName?: string;
   runtimeObject?: string;
   interviewId?: string;
+  interviewCount?: number;
   flowDefinitionId?: string;
   flowVersionId?: string;
   elementApiName?: string;
@@ -718,6 +720,52 @@ function App() {
       });
     }
   }, [enabledKinds, expandedIds, nodeById, query]);
+
+  const collapseNodeBranch = useCallback((id: string, pushHistory = true, anchorPosition?: GraphPoint): boolean => {
+    const clickedNode = nodeById.get(id);
+    if (!clickedNode || !expandedIds.has(id)) {
+      return false;
+    }
+
+    const revealPlan = buildRevealPlan(id, nodeById, enabledKinds, query);
+    const isActiveBranch = selectedId === id || activeRevealSourceId === id;
+    if (!isActiveBranch || revealPlan.visibleChildIds.length === 0) {
+      return false;
+    }
+
+    setLayoutAnchor(anchorPosition ? { nodeId: id, position: { ...anchorPosition } } : null);
+    setSelectedId(id);
+    setActiveRevealSourceId(null);
+    setActiveDmlFocusId((current) => {
+      const currentNode = current ? nodeById.get(current) : undefined;
+      if (clickedNode.kind === 'dml' || (currentNode && isDescendantOf(currentNode, id, nodeById))) {
+        return null;
+      }
+      return resolveDmlFocusId(clickedNode, current, nodeById);
+    });
+    setExpandedIds((current) => {
+      const next = new Set(current);
+      next.delete(id);
+      collectDescendantNodes(clickedNode, nodeById).forEach((node) => next.delete(node.id));
+      addParentExpansion(id, nodeById, next);
+      return next;
+    });
+
+    if (pushHistory) {
+      setNavHistory((prev) => {
+        const nextStack = prev.stack.slice(0, prev.index + 1);
+        if (nextStack[nextStack.length - 1] === id) {
+          return prev;
+        }
+        return {
+          stack: [...nextStack, id],
+          index: nextStack.length
+        };
+      });
+    }
+
+    return true;
+  }, [activeRevealSourceId, enabledKinds, expandedIds, nodeById, query, selectedId]);
 
   const navigateBack = useCallback(() => {
     setNavHistory((prev) => {
@@ -1956,12 +2004,18 @@ function App() {
                 onInit={(instance) => {
                   reactFlowRef.current = instance;
                 }}
-                onNodeClick={(_, node) => {
+                onNodeClick={(event, node) => {
+                  if (event.detail > 1) {
+                    return;
+                  }
                   if (!isPanLocked && node.data.storyNode.kind !== 'gap') {
                     if (!highlightedOperationIds.has(node.id)) {
                       clearDataOperationFocus();
                     }
-                    selectNode(node.id, true, node.position, { autoSelectFirstChild: shouldAutoSelectFirstChild(node.data.storyNode) });
+                    const collapsed = collapseNodeBranch(node.id, true, node.position);
+                    if (!collapsed) {
+                      selectNode(node.id, true, node.position, { autoSelectFirstChild: shouldAutoSelectFirstChild(node.data.storyNode) });
+                    }
                   }
                 }}
                 fitView
@@ -2269,6 +2323,7 @@ function StoryGraphNode({ data }: NodeProps<Node<GraphNodeData>>) {
   const {
     storyNode,
     selected,
+    expanded,
     childCount,
     executionOrder,
     querySummary,
@@ -2292,7 +2347,7 @@ function StoryGraphNode({ data }: NodeProps<Node<GraphNodeData>>) {
   const hasQueryLens = soqlLensEnabled && querySummary !== undefined && querySummary.executionCount > 0;
   const hasDownstreamQueryLens =
     soqlLensEnabled && downstreamQuerySummary !== undefined && downstreamQuerySummary.executionCount > 0;
-  const nextCue = childCount > 0 ? nextCueText(storyNode, childCount, selected) : null;
+  const nextCue = childCount > 0 ? nextCueText(storyNode, childCount, selected, expanded) : null;
 
   return (
     <div
@@ -3587,6 +3642,12 @@ function FlowContextPanel({ context, onSelectNode }: { context: FlowContext; onS
             <strong>{context.interviewId}</strong>
           </div>
         )}
+        {context.interviewCount && context.interviewCount > 1 && (
+          <div className="metric-row">
+            <span>Interview count</span>
+            <strong>{formatNumber(context.interviewCount)}</strong>
+          </div>
+        )}
         {context.flowDefinitionId && (
           <div className="metric-row">
             <span>Flow definition id</span>
@@ -3608,7 +3669,10 @@ function FlowContextPanel({ context, onSelectNode }: { context: FlowContext; onS
             <KindIcon kind={context.flowNode.kind} />
             <span>
               <strong>{String(context.flowNode.metrics.flowApiName ?? context.flowNode.label)}</strong>
-              <small>line {context.flowNode.lineStart}</small>
+              <small>
+                {flowInterviewCount(context.flowNode) > 1 ? `${formatNumber(flowInterviewCount(context.flowNode))} interviews · ` : ''}
+                line {context.flowNode.lineStart}
+              </small>
             </span>
           </button>
         </div>
@@ -3623,7 +3687,10 @@ function FlowContextPanel({ context, onSelectNode }: { context: FlowContext; onS
                 <KindIcon kind={flow.kind} />
                 <span>
                   <strong>{String(flow.metrics.flowApiName ?? flow.label)}</strong>
-                  <small>line {flow.lineStart}</small>
+                  <small>
+                    {flowInterviewCount(flow) > 1 ? `${formatNumber(flowInterviewCount(flow))} interviews · ` : ''}
+                    line {flow.lineStart}
+                  </small>
                 </span>
               </button>
             ))}
@@ -3637,21 +3704,31 @@ function FlowContextPanel({ context, onSelectNode }: { context: FlowContext; onS
   );
 }
 
-function nextCueText(node: StoryNode, childCount: number, selected: boolean): { label: string; title: string } {
+function nextCueText(node: StoryNode, childCount: number, selected: boolean, expanded: boolean): { label: string; title: string } {
   if (node.kind === 'flow') {
     const item = `Flow element${childCount === 1 ? '' : 's'}`;
+    if (selected && expanded) {
+      return {
+        label: 'click: collapse',
+        title: `Click this Flow interview again to hide its visible Flow elements`
+      };
+    }
     return {
-      label: selected ? `${formatNumber(childCount)} ${item}` : `click: ${formatNumber(childCount)} ${item}`,
-      title: selected
-        ? `Visible Flow elements inside this Flow interview`
-        : `Click this Flow interview to reveal its Flow elements`
+      label: `click: ${formatNumber(childCount)} ${item}`,
+      title: `Click this Flow interview to reveal its Flow elements`
     };
   }
 
   const item = `downstream event${childCount === 1 ? '' : 's'}`;
+  if (selected && expanded) {
+    return {
+      label: 'click: collapse',
+      title: `Click this node again to hide its visible downstream events`
+    };
+  }
   return {
-    label: selected ? `${formatNumber(childCount)} downstream` : `click: ${formatNumber(childCount)} downstream`,
-    title: selected ? `Visible ${item} for this node` : `Click this node to reveal its ${item}`
+    label: `click: ${formatNumber(childCount)} downstream`,
+    title: `Click this node to reveal its ${item}`
   };
 }
 
@@ -4269,7 +4346,7 @@ function buildFlowGraph(
   const context = selectedId ? buildGraphContext(selectedId, byId) : null;
   const failureContext = selectedId ? buildFailureContext(selectedId, byId) : null;
   const focusedDmlNode = activeDmlFocusId ? byId.get(activeDmlFocusId) : undefined;
-  const dmlFocusId = focusedDmlNode?.kind === 'dml' && !normalized ? focusedDmlNode.id : null;
+  const dmlFocusId = focusedDmlNode?.kind === 'dml' && selectedId === focusedDmlNode.id && !normalized ? focusedDmlNode.id : null;
 
   const addAncestors = (nodeId: string | undefined) => {
     let cursor = nodeId ? byId.get(nodeId) : undefined;
@@ -4397,6 +4474,7 @@ function buildFlowGraph(
       data: {
         storyNode: node,
         selected: selectedId === node.id,
+        expanded: expandedIds.has(node.id),
         childCount: node.kind === 'gap' ? 0 : buildRevealPlan(node.id, byId, enabledKinds, query).visibleChildIds.length,
         executionOrder: executionOrderById.get(node.id),
         siblingOrder: siblingOrderById.get(node.id)?.index,
@@ -5130,6 +5208,15 @@ function addAncestorExpansion(nodeId: string, nodeById: Map<string, StoryNode>, 
   }
 }
 
+function addParentExpansion(nodeId: string, nodeById: Map<string, StoryNode>, target: Set<string>): void {
+  const node = nodeById.get(nodeId);
+  let cursor = node?.parentId ? nodeById.get(node.parentId) : undefined;
+  while (cursor) {
+    target.add(cursor.id);
+    cursor = cursor.parentId ? nodeById.get(cursor.parentId) : undefined;
+  }
+}
+
 function isGraphCandidate(
   node: StoryNode,
   enabledKinds: Set<GraphVisibilityKey>,
@@ -5823,6 +5910,10 @@ function queryExecutionCount(node: StoryNode): number {
   return Math.max(1, Number(node.metrics.executionCount ?? node.loopMultiplier ?? 1) || 1);
 }
 
+function flowInterviewCount(node?: StoryNode): number {
+  return Math.max(1, Number(node?.metrics.interviewCount ?? node?.loopMultiplier ?? 1) || 1);
+}
+
 function queryRows(node: StoryNode): number {
   return Math.max(0, Number(node.metrics.rows ?? 0) || 0);
 }
@@ -5935,6 +6026,7 @@ function buildFlowContext(selectedNode: StoryNode, ancestors: StoryNode[], desce
     flowApiName,
     runtimeObject,
     interviewId: metricText(selectedNode.metrics.interviewId) ?? metricText(owningFlow?.metrics.interviewId),
+    interviewCount: flowInterviewCount(selectedNode.kind === 'flow' ? selectedNode : owningFlow),
     flowDefinitionId: metricText(selectedNode.metrics.flowDefinitionId) ?? metricText(owningFlow?.metrics.flowDefinitionId),
     flowVersionId: metricText(selectedNode.metrics.flowVersionId) ?? metricText(owningFlow?.metrics.flowVersionId),
     elementApiName: selectedNode.kind === 'flowElement' ? metricText(selectedNode.metrics.apiName) : undefined,
@@ -6656,7 +6748,10 @@ function nodeSubtitle(node: StoryNode): string {
     return `Runtime wrapper · ${node.metrics.objectName ?? 'record-triggered'}${loopText}`;
   }
   if (node.kind === 'flow') {
-    return `${node.metrics.flowApiName ? 'Flow interview' : (node.subtitle || 'Flow interview')}${loopText}`;
+    const interviewCount = flowInterviewCount(node);
+    return interviewCount > 1
+      ? `${formatNumber(interviewCount)} Flow interviews`
+      : `${node.metrics.flowApiName ? 'Flow interview' : (node.subtitle || 'Flow interview')}${loopText}`;
   }
   return `${node.subtitle || `${node.childIds.length} downstream`}${loopText}`;
 }
