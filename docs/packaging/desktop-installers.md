@@ -38,7 +38,7 @@ For Windows, prefer the GitHub Release workflow because it builds the installer 
 
 ## GitHub Release Flow
 
-1. Update `CHANGELOG.md` and `docs/releases/v0.1.1.md`.
+1. Update `CHANGELOG.md` and the matching `docs/releases/v<version>.md`.
 2. Confirm the app builds:
 
 ```bash
@@ -49,8 +49,8 @@ npm run vscode:package
 3. Create and push a version tag:
 
 ```bash
-git tag v0.1.1
-git push origin v0.1.1
+git tag v<version>
+git push origin v<version>
 ```
 
 4. GitHub Actions runs `.github/workflows/release.yml`.

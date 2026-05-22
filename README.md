@@ -138,7 +138,7 @@ Install from VSIX:
 Command-line install:
 
 ```bash
-code --install-extension release/apex-debug-log-explorer-0.1.1.vsix
+code --install-extension release/apex-debug-log-explorer-<version>.vsix
 ```
 
 After installation, the extension opens supported logs from the editor context menu, the Explorer context menu, or Command Palette.
@@ -152,11 +152,11 @@ See `docs/publishing/vscode-marketplace.md` for publisher setup and Marketplace 
 3. Create a version tag:
 
 ```bash
-git tag v0.1.1
-git push origin v0.1.1
+git tag v<version>
+git push origin v<version>
 ```
 
-The release workflow builds desktop artifacts and the VS Code `.vsix`, then creates a GitHub Release using `docs/releases/v0.1.1.md`.
+The release workflow builds desktop artifacts and the VS Code `.vsix`, then creates a GitHub Release using the matching `docs/releases/v<version>.md` file when present.
 
 The release artifacts include:
 
