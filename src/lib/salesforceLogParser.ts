@@ -1,4 +1,4 @@
-import type { ExceptionDetail, Hotspot, LogSummary, NodeKind, NoiseGroup, ParseResult, StoryNode } from './types';
+import type { DebugMessage, ExceptionDetail, FlowDecisionTrace, Hotspot, LogSummary, NodeKind, NoiseGroup, ParseResult, StoryNode } from './types';
 
 const LOG_LINE_PATTERN = /^(\d{2}:\d{2}:\d{2}\.\d+)\s+\((\d+)\)\|([^|]*)(?:\|(.*))?$/;
 
@@ -56,6 +56,7 @@ interface StackFrame {
 interface CodeUnitInfo {
   id: string;
   label: string;
+  startLine: number;
   entryLimits: LimitSnapshot;
 }
 
@@ -68,6 +69,7 @@ interface PendingSoql {
 
 interface PendingFlowRecordMutation {
   nodeId: string;
+  interviewId?: string;
   parentId?: string;
   operation: 'insert' | 'update' | 'delete';
   startNs: number;
@@ -119,12 +121,25 @@ interface CalloutStackItem {
 interface CalloutInfo {
   label: string;
   subtitle: string;
+  rawText?: string;
+  sourceLine?: number;
   endpoint?: string;
+  endpointRedacted?: string;
   endpointHost?: string;
   method?: string;
   status?: string;
   statusCode?: string;
   namedCredential?: string;
+  namedCredentialId?: string;
+  namedCredentialName?: string;
+  externalCredentialType?: string;
+  authorizationSummary?: string;
+  contentType?: string;
+  requestSizeBytes?: number;
+  responseSizeBytes?: number;
+  retryOn401?: string;
+  overallCalloutTimeMs?: number;
+  connectTimeMs?: number;
 }
 
 interface ValidationRuleContext {
@@ -166,6 +181,16 @@ interface SourceContext {
   evidence: string;
 }
 
+interface AttributionContext {
+  bridge: string[];
+  callerChain: string[];
+  source: string;
+  graphSource?: string;
+  confidence: string;
+  ownerSignature?: string;
+  debugSignature?: string;
+}
+
 type LimitSnapshot = Record<string, number>;
 type AddNode = (
   kind: NodeKind,
@@ -185,6 +210,8 @@ export function parseSalesforceLog(text: string): ParseResult {
   const flowByInterview = new Map<string, string>();
   const flowElementByKey = new Map<string, string>();
   const lastFlowElementByParent = new Map<string, string>();
+  const lastFlowElementByInterview = new Map<string, string>();
+  const activeBulkDecisionByInterview = new Map<string, string>();
   const eventCounts = new Map<string, number>();
   const methodCounts = new Map<string, number>();
   const dmlByObject = new Map<string, number>();
@@ -193,8 +220,10 @@ export function parseSalesforceLog(text: string): ParseResult {
   const currentLimitCeilings: LimitSnapshot = {};
   const methodContextByKey = new Map<string, string>();
   const latestDebugContextByParent = new Map<string, DebugContext>();
+  const recentDebugMessagesByParent = new Map<string, DebugMessage[]>();
   const recentSourceContexts: SourceContext[] = [];
   const soqlRepeatByKey = new Map<string, string>();
+  const exceptionNodeByStackKey = new Map<string, string>();
 
   let sequence = 0;
   let firstNs: number | undefined;
@@ -273,7 +302,7 @@ export function parseSalesforceLog(text: string): ParseResult {
     detail: 'Upload a Salesforce Apex debug log to inspect the execution path.'
   });
 
-  const codeUnitStack: CodeUnitInfo[] = [{ id: root.id, label: root.label, entryLimits: { ...currentLimits } }];
+  const codeUnitStack: CodeUnitInfo[] = [{ id: root.id, label: root.label, startLine: 1, entryLimits: { ...currentLimits } }];
   const skippedCodeUnitFinishDepths: number[] = [];
   const methodStack: StackFrame[] = [];
   const dmlStack: string[] = [];
@@ -335,11 +364,22 @@ export function parseSalesforceLog(text: string): ParseResult {
         const activeDmlNode = nodeById.get(dmlStack[dmlStack.length - 1] ?? '');
         const defaultParentId = activeDmlNode?.id ?? codeUnitParentId;
         const canUseFlowMutationParent =
-          !pendingFlowRecordMutation || !activeDmlNode || activeDmlNode.startNs <= pendingFlowRecordMutation.startNs;
+          !pendingFlowRecordMutation || !activeDmlNode || activeDmlNode.startNs > pendingFlowRecordMutation.startNs;
         const mutationParentId = canUseFlowMutationParent
           ? flowRecordMutationParentId(classified, pendingFlowRecordMutation, codeUnitParentId)
           : codeUnitParentId;
-        const parentId = mutationParentId !== codeUnitParentId ? mutationParentId : defaultParentId;
+        const runtimeParentId = mutationParentId !== codeUnitParentId ? mutationParentId : defaultParentId;
+        const parentId = bridgeNestedCodeUnitParent(
+          runtimeParentId,
+          codeUnitParentId,
+          activeDmlNode,
+          methodStack,
+          lineNumber,
+          ns,
+          addNode,
+          nodeById,
+          methodContextByKey
+        );
         const metrics = { ...classified.metrics };
         let subtitle = classified.subtitle;
         if (pendingApexActionWrapper && rawName.startsWith(`${pendingApexActionWrapper.className}.${pendingApexActionWrapper.methodName}(`)) {
@@ -362,7 +402,7 @@ export function parseSalesforceLog(text: string): ParseResult {
         if (parentId === pendingFlowRecordMutation?.nodeId && typeof classified.metrics.objectName === 'string') {
           pendingFlowRecordMutation.objectName = classified.metrics.objectName;
         }
-        codeUnitStack.push({ id: node.id, label: node.label, entryLimits: { ...currentLimits } });
+        codeUnitStack.push({ id: node.id, label: node.label, startLine: lineNumber, entryLimits: { ...currentLimits } });
         break;
       }
       case 'CODE_UNIT_FINISHED': {
@@ -374,10 +414,11 @@ export function parseSalesforceLog(text: string): ParseResult {
         if (finished && finished.id !== root.id) {
           const node = nodeById.get(finished.id);
           closeNode(node, ns, lineNumber);
+          extendMethodAncestors(node, ns, lineNumber, nodeById);
           attachLimitDeltas(node, finished.entryLimits, currentLimits, currentLimitCeilings);
         }
         if (codeUnitStack.length === 0) {
-          codeUnitStack.push({ id: root.id, label: root.label, entryLimits: { ...currentLimits } });
+          codeUnitStack.push({ id: root.id, label: root.label, startLine: 1, entryLimits: { ...currentLimits } });
         }
         break;
       }
@@ -581,6 +622,15 @@ export function parseSalesforceLog(text: string): ParseResult {
       case 'CALLOUT_REQUEST':
       case 'NAMED_CREDENTIAL_REQUEST': {
         const callout = parseCalloutRequest(eventType, fields);
+        if (eventType === 'NAMED_CREDENTIAL_REQUEST') {
+          const activeStackItem = calloutStack.at(-1);
+          const activeNode = activeStackItem ? nodeById.get(activeStackItem.id) : undefined;
+          if (activeStackItem?.requestType === 'CALLOUT_REQUEST' && activeNode?.kind === 'callout') {
+            mergeCalloutRequestNode(activeNode, callout, eventType, fields, lineNumber);
+            activeNode.lineEnd = Math.max(activeNode.lineEnd, lineNumber);
+            break;
+          }
+        }
         const caller = ensureCallerPath(methodStack, codeUnitStack);
         const bridge = selectBusinessMethodBridge(caller.chain);
         const parentId = ensureMethodContextPath(
@@ -599,10 +649,7 @@ export function parseSalesforceLog(text: string): ParseResult {
           metrics: {
             calloutType: eventType,
             calloutStatus: 'request',
-            ...(callout.endpoint ? { endpoint: callout.endpoint } : {}),
-            ...(callout.endpointHost ? { endpointHost: callout.endpointHost } : {}),
-            ...(callout.method ? { method: callout.method } : {}),
-            ...(callout.namedCredential ? { namedCredential: callout.namedCredential } : {}),
+            ...calloutRequestMetrics(callout, eventType, lineNumber),
             attribution: bridge.length > 0 ? 'Apex caller stack' : 'Code unit context',
             attributionConfidence: bridge.length > 0 ? 'low' : 'unknown'
           },
@@ -618,27 +665,13 @@ export function parseSalesforceLog(text: string): ParseResult {
         const stackItem = stackIndex >= 0 ? calloutStack.splice(stackIndex, 1)[0] : undefined;
         const node = stackItem ? nodeById.get(stackItem.id) : undefined;
         if (node?.kind === 'callout') {
-          node.subtitle = response.subtitle || node.subtitle;
-          node.detail = `${node.detail ?? ''}\n${eventType}|${fields.join('|')}`.trim();
-          node.metrics.calloutType = stackItem?.requestType ?? node.metrics.calloutType ?? eventType;
-          node.metrics.calloutStatus = 'response';
-          if (response.status) {
-            node.metrics.status = response.status;
+          mergeCalloutResponseNode(node, response, stackItem?.requestType ?? eventType, eventType, fields, lineNumber);
+          if (eventType === 'NAMED_CREDENTIAL_RESPONSE' && stackItem?.requestType === 'CALLOUT_REQUEST') {
+            calloutStack.push(stackItem);
+          } else {
+            closeNode(node, ns, lineNumber);
+            extendMethodAncestors(node, ns, lineNumber, nodeById);
           }
-          if (response.statusCode) {
-            node.metrics.statusCode = response.statusCode;
-          }
-          if (response.endpoint) {
-            node.metrics.endpoint = response.endpoint;
-          }
-          if (response.endpointHost) {
-            node.metrics.endpointHost = response.endpointHost;
-          }
-          if (response.namedCredential) {
-            node.metrics.namedCredential = response.namedCredential;
-          }
-          closeNode(node, ns, lineNumber);
-          extendMethodAncestors(node, ns, lineNumber, nodeById);
           break;
         }
 
@@ -650,11 +683,7 @@ export function parseSalesforceLog(text: string): ParseResult {
           metrics: {
             calloutType: eventType,
             calloutStatus: 'response',
-            ...(response.endpoint ? { endpoint: response.endpoint } : {}),
-            ...(response.endpointHost ? { endpointHost: response.endpointHost } : {}),
-            ...(response.status ? { status: response.status } : {}),
-            ...(response.statusCode ? { statusCode: response.statusCode } : {}),
-            ...(response.namedCredential ? { namedCredential: response.namedCredential } : {})
+            ...calloutResponseMetrics(response, eventType, lineNumber)
           },
           callerChain: caller.chain
         });
@@ -669,17 +698,41 @@ export function parseSalesforceLog(text: string): ParseResult {
         const profile = findDmlProfile(dmlProfiles, dml.sourceLine, dml.operation, dml.objectName);
         const debugContext = latestDebugContextByParent.get(caller.parentId);
         const contextChain = buildDmlContextChain(caller.chain, profile, debugContext, lineNumber, ns);
+        const debugTrail = collectRecentDebugTrail(
+          recentDebugMessagesByParent.get(caller.parentId) ?? [],
+          contextChain.ownerSignature,
+          lineNumber
+        );
+        const debugSignature =
+          contextChain.debugSignature ??
+          inferDebugAttributionSignature(recentDebugMessagesByParent.get(caller.parentId) ?? [], contextChain.ownerSignature, lineNumber);
+        const label = `${dml.operation} ${dml.objectName}`;
+        const sourceAttributionPath = buildSourceAttributionPath({
+          parent: nodeById.get(caller.parentId),
+          callerBridge: contextChain.bridge,
+          ownerSignature: contextChain.ownerSignature,
+          debugSignature,
+          eventLabel: label
+        });
+        const sourceBridge = sourceContextBridgeFromAttributionPath(
+          sourceAttributionPath,
+          nodeById.get(caller.parentId),
+          label
+        );
+        const graphBridge = sourceBridge.length > 0 ? sourceBridge : contextChain.bridge;
         const parentId = ensureMethodContextPath(
           caller.parentId,
-          contextChain.bridge,
+          graphBridge,
           lineNumber,
           ns,
-          contextChain.source,
+          contextChain.graphSource ??
+          (graphBridge.length > 0 && contextChain.source !== 'Apex caller stack'
+            ? `${contextChain.source} source context`
+            : contextChain.source),
           addNode,
           nodeById,
           methodContextByKey
         );
-        const label = `${dml.operation} ${dml.objectName}`;
         const node = addNode('dml', label, lineNumber, ns, parentId, {
           subtitle: `${dml.rows} ${dml.rows === 1 ? 'row' : 'rows'}`,
           detail: fields.join('|'),
@@ -689,9 +742,18 @@ export function parseSalesforceLog(text: string): ParseResult {
             rows: dml.rows,
             attribution: contextChain.source,
             attributionConfidence: contextChain.confidence,
+            ...(contextChain.ownerSignature ? { ownerSignature: contextChain.ownerSignature } : {}),
+            ...(debugSignature ? { debugSignature } : {}),
+            ...(sourceAttributionPath.length > 0
+              ? {
+                  sourceAttributionPath: sourceAttributionPath.join('|'),
+                  sourceAttributionConfidence: 'runtime + debug/profile evidence'
+                }
+              : {}),
             ...(dml.sourceLine === undefined ? {} : { sourceLine: dml.sourceLine })
           },
-          callerChain: contextChain.callerChain
+          ...(debugTrail.length > 0 ? { debugMessages: debugTrail } : {}),
+          callerChain: uniqueStrings([...contextChain.callerChain, ...graphBridge])
         });
         dmlStack.push(node.id);
         break;
@@ -712,17 +774,44 @@ export function parseSalesforceLog(text: string): ParseResult {
         const caller = ensureCallerPath(methodStack, codeUnitStack);
         const profile = findSoqlProfile(soqlProfiles, soql.sourceLine, soql.objectName, soql.query);
         const contextChain = buildSoqlContextChain(caller.chain, profile);
+        const debugTrail = collectRecentDebugTrail(
+          recentDebugMessagesByParent.get(caller.parentId) ?? [],
+          contextChain.ownerSignature,
+          lineNumber
+        );
+        const debugSignature = inferDebugAttributionSignature(
+          recentDebugMessagesByParent.get(caller.parentId) ?? [],
+          contextChain.ownerSignature,
+          lineNumber
+        );
+        const label = `Query ${soql.objectName}`;
+        const sourceAttributionPath = buildSourceAttributionPath({
+          parent: nodeById.get(caller.parentId),
+          callerBridge: contextChain.bridge,
+          ownerSignature: contextChain.ownerSignature,
+          debugSignature,
+          eventLabel: label
+        });
+        const sourceBridge = sourceContextBridgeFromAttributionPath(
+          sourceAttributionPath,
+          nodeById.get(caller.parentId),
+          label
+        );
+        const graphBridge = sourceBridge.length > 0 ? sourceBridge : contextChain.bridge;
         const parentId = ensureMethodContextPath(
           caller.parentId,
-          contextChain.bridge,
+          graphBridge,
           lineNumber,
           ns,
-          contextChain.source,
+          contextChain.graphSource ??
+          (graphBridge.length > 0 && contextChain.source !== 'Apex caller stack'
+            ? `${contextChain.source} source context`
+            : contextChain.source),
           addNode,
           nodeById,
           methodContextByKey
         );
-        const soqlKey = soqlRepeatKey(parentId, contextChain.callerChain, soql.query);
+        const soqlKey = soqlRepeatKey(parentId, uniqueStrings([...contextChain.callerChain, ...graphBridge]), soql.query);
         const repeatedNode = nodeById.get(soqlRepeatByKey.get(soqlKey) ?? '');
         if (repeatedNode?.kind === 'soql') {
           repeatedNode.loopMultiplier = (repeatedNode.loopMultiplier ?? 1) + 1;
@@ -742,7 +831,7 @@ export function parseSalesforceLog(text: string): ParseResult {
           pendingSoql = { id: repeatedNode.id, queryObject: soql.objectName, key: soqlKey, startNs: ns };
           break;
         }
-        const node = addNode('soql', `Query ${soql.objectName}`, lineNumber, ns, parentId, {
+        const node = addNode('soql', label, lineNumber, ns, parentId, {
           subtitle: `${soql.fieldCount} selected ${soql.fieldCount === 1 ? 'field' : 'fields'}`,
           detail: soql.query,
           metrics: {
@@ -752,6 +841,13 @@ export function parseSalesforceLog(text: string): ParseResult {
             executionCount: 1,
             attribution: contextChain.source,
             attributionConfidence: contextChain.confidence,
+            ...(debugSignature ? { debugSignature } : {}),
+            ...(sourceAttributionPath.length > 0
+              ? {
+                  sourceAttributionPath: sourceAttributionPath.join('|'),
+                  sourceAttributionConfidence: 'runtime + debug/profile evidence'
+                }
+              : {}),
             ...(soql.sourceLine === undefined ? {} : { sourceLine: soql.sourceLine }),
             ...(profile
               ? {
@@ -761,7 +857,8 @@ export function parseSalesforceLog(text: string): ParseResult {
                 }
               : {})
           },
-          callerChain: contextChain.callerChain
+          ...(debugTrail.length > 0 ? { debugMessages: debugTrail } : {}),
+          callerChain: uniqueStrings([...contextChain.callerChain, ...graphBridge])
         });
         soqlRepeatByKey.set(soqlKey, node.id);
         pendingSoql = { id: node.id, queryObject: soql.objectName, key: soqlKey, startNs: ns };
@@ -873,6 +970,7 @@ export function parseSalesforceLog(text: string): ParseResult {
         const elementType = fields[1] ?? 'FlowElement';
         const apiName = fields[2] ?? 'Flow element';
         const parentId = flowByInterview.get(interviewId) ?? currentCodeUnitId(codeUnitStack);
+        const previousElement = nodeById.get(lastFlowElementByInterview.get(interviewId) ?? '');
         const isEmailAction = isFlowEmailAction(elementType, apiName);
         const previousSibling = findRecentMatchingFlowElement(parentId, interviewId, elementType, apiName, nodeById);
         if (
@@ -881,6 +979,8 @@ export function parseSalesforceLog(text: string): ParseResult {
           previousSibling.loopMultiplier = (previousSibling.loopMultiplier ?? 1) + 1;
           previousSibling.metrics.loopMultiplier = previousSibling.loopMultiplier;
           previousSibling.lineEnd = Math.max(previousSibling.lineEnd, lineNumber);
+          linkDecisionToNextElement(previousElement, previousSibling, lineNumber);
+          lastFlowElementByInterview.set(interviewId, previousSibling.id);
           flowElementByKey.set(flowElementKey(interviewId, elementType, apiName), previousSibling.id);
           break;
         }
@@ -891,7 +991,13 @@ export function parseSalesforceLog(text: string): ParseResult {
             ? { interviewId, elementType, apiName, emailType: 'Flow Email Action', emailStatus: 'requested' }
             : { interviewId, elementType, apiName }
         });
+        if (elementType === 'FlowDecision') {
+          ensureFlowDecisionTrace(node, interviewId, apiName, lineNumber);
+        } else {
+          linkDecisionToNextElement(previousElement, node, lineNumber);
+        }
         lastFlowElementByParent.set(parentId, node.id);
+        lastFlowElementByInterview.set(interviewId, node.id);
         flowElementByKey.set(flowElementKey(interviewId, elementType, apiName), node.id);
         if (isEmailAction) {
           latestEmailNodeId = node.id;
@@ -901,11 +1007,31 @@ export function parseSalesforceLog(text: string): ParseResult {
       case 'FLOW_ELEMENT_DEFERRED': {
         const elementType = fields[0] ?? '';
         const apiName = fields[1] ?? '';
-        const nodeId = [...flowElementByKey.entries()].find(([key]) => key.endsWith(`|${elementType}|${apiName}`))?.[1];
-        const node = nodeId ? nodeById.get(nodeId) : undefined;
+        const node = findLatestFlowElementNode(elementType, apiName, nodeById, lineNumber);
         if (node?.kind === 'flowElement' || node?.kind === 'email') {
           node.metrics.deferredByFlowRuntime = true;
           node.lineEnd = Math.max(node.lineEnd, lineNumber);
+        }
+        break;
+      }
+      case 'FLOW_RULE_DETAIL': {
+        const interviewId = fields[0] ?? '';
+        const outcomeApiName = fields[1] ?? '';
+        const result = parseLogBoolean(fields[2]);
+        const connectorMatched = parseLogBoolean(fields[3]);
+        const node = nodeById.get(activeBulkDecisionByInterview.get(interviewId) ?? '') ?? findLatestFlowDecisionNode(interviewId, nodeById, lineNumber);
+        if (node && outcomeApiName && result !== undefined) {
+          appendFlowDecisionOutcome(node, outcomeApiName, result, connectorMatched, lineNumber);
+        }
+        break;
+      }
+      case 'FLOW_VALUE_ASSIGNMENT': {
+        const interviewId = fields[0] ?? '';
+        const variableName = fields[1] ?? '';
+        const value = parseLogBoolean(fields[2]);
+        const node = findLatestFlowDecisionNode(interviewId, nodeById, lineNumber);
+        if (node && variableName && value !== undefined && node.flowDecision?.outcomes.some((outcome) => outcome.outcomeApiName === variableName)) {
+          markFlowDecisionValueAssignment(node, variableName, value, lineNumber);
         }
         break;
       }
@@ -1007,13 +1133,19 @@ export function parseSalesforceLog(text: string): ParseResult {
       case 'FLOW_BULK_ELEMENT_BEGIN': {
         const elementType = fields[0] ?? '';
         const apiName = fields[1] ?? '';
-        const nodeId = [...flowElementByKey.entries()].find(([key]) => key.endsWith(`|${elementType}|${apiName}`))?.[1];
-        const node = nodeId ? nodeById.get(nodeId) : undefined;
+        const node = findLatestFlowElementNode(elementType, apiName, nodeById, lineNumber);
         if (node) {
+          if (elementType === 'FlowDecision') {
+            const interviewId = String(node.metrics.interviewId ?? '');
+            if (interviewId) {
+              activeBulkDecisionByInterview.set(interviewId, node.id);
+            }
+          }
           const operation = flowRecordMutationOperation(elementType);
           if (operation) {
             pendingFlowRecordMutation = {
               nodeId: node.id,
+              interviewId: String(node.metrics.interviewId ?? '') || undefined,
               parentId: node.parentId,
               operation,
               startNs: ns
@@ -1025,11 +1157,16 @@ export function parseSalesforceLog(text: string): ParseResult {
       case 'FLOW_BULK_ELEMENT_END': {
         const elementType = fields[0] ?? '';
         const apiName = fields[1] ?? '';
-        const nodeId = [...flowElementByKey.entries()].find(([key]) => key.endsWith(`|${elementType}|${apiName}`))?.[1];
-        const node = nodeId ? nodeById.get(nodeId) : undefined;
+        const node = findLatestFlowElementNode(elementType, apiName, nodeById, lineNumber);
         if (node) {
           node.metrics.bulkResult = `${fields[2] ?? 0}/${fields[3] ?? 0}`;
           closeNode(node, ns, lineNumber);
+          if (elementType === 'FlowDecision') {
+            const interviewId = String(node.metrics.interviewId ?? '');
+            if (interviewId) {
+              activeBulkDecisionByInterview.delete(interviewId);
+            }
+          }
         }
         break;
       }
@@ -1049,6 +1186,9 @@ export function parseSalesforceLog(text: string): ParseResult {
           node.metrics.flowApiName = flowName;
         }
         closeNode(node, ns, lineNumber);
+        if (pendingFlowRecordMutation?.interviewId === interviewId) {
+          pendingFlowRecordMutation = undefined;
+        }
         break;
       }
       case 'FLOW_INTERVIEW_FINISHED_LIMIT_USAGE':
@@ -1097,27 +1237,51 @@ export function parseSalesforceLog(text: string): ParseResult {
       }
       case 'EXCEPTION_THROWN':
       case 'FATAL_ERROR': {
-        const caller = ensureCallerPath(methodStack, codeUnitStack);
         const exceptionStack = collectExceptionStack(rawLines, index);
-        const exceptionBridge = selectBusinessMethodBridge([...exceptionStack].reverse(), 6);
+        const exception = parseException(fields, eventType, line, exceptionStack);
+        const stackKey = exceptionStackFingerprint(exception);
+        const existingException = stackKey ? nodeById.get(exceptionNodeByStackKey.get(stackKey) ?? '') : undefined;
+        if (existingException?.kind === 'exception') {
+          mergeRepeatedExceptionNode(existingException, exception, lineNumber, ns);
+          if (pendingSoqlBelongsToException(pendingSoql, exception.apexLine, nodeById)) {
+            pendingSoql = undefined;
+          }
+          break;
+        }
+
+        const caller = ensureCallerPath(methodStack, codeUnitStack);
+        const stackBridge = selectBusinessMethodBridge([...exceptionStack].reverse());
+        const activeBridge = selectBusinessMethodBridge(caller.chain);
+        const exceptionBridge = stackBridge.length > 0 ? uniqueBusinessSignatures([...activeBridge, ...stackBridge]) : activeBridge;
+        const baseParentId =
+          stackBridge.length > 0 && activeBridge.length === 0
+            ? findExceptionStackParentId(exceptionStack, lineNumber, ns, caller.parentId, nodeById)
+            : caller.parentId;
         const parentId = ensureMethodContextPath(
-          caller.parentId,
+          baseParentId,
           exceptionBridge,
           lineNumber,
           ns,
-          'Exception stack',
+          stackBridge.length > 0 && activeBridge.length === 0 ? 'Exception stack' : 'Apex caller stack',
           addNode,
           nodeById,
           methodContextByKey
         );
-        const exception = parseException(fields, eventType, line, exceptionStack);
-        attachPendingSoqlToExceptionOwner(pendingSoql, exception.apexLine, parentId, exceptionBridge, nodeById);
-        addExceptionNode(exception, lineNumber, ns, parentId, [...caller.chain, ...exceptionBridge]);
+        if (attachPendingSoqlToExceptionOwner(pendingSoql, exception.apexLine, parentId, exceptionBridge, nodeById)) {
+          pendingSoql = undefined;
+        }
+        const node = addExceptionNode(exception, lineNumber, ns, parentId, [...caller.chain, ...exceptionBridge]);
+        if (node && stackKey) {
+          exceptionNodeByStackKey.set(stackKey, node.id);
+        }
         break;
       }
       case 'USER_DEBUG': {
         const caller = ensureCallerPath(methodStack, codeUnitStack);
-        attachDebugMessage(nodeById.get(caller.parentId), fields, lineNumber, line);
+        const debugMessage = attachDebugMessage(nodeById.get(caller.parentId), fields, lineNumber, line);
+        if (debugMessage) {
+          trackRecentDebugMessage(recentDebugMessagesByParent, caller.parentId, debugMessage);
+        }
         const debugContext = parseDebugContext(fields, lineNumber, ns, caller.parentId);
         if (debugContext) {
           latestDebugContextByParent.set(caller.parentId, debugContext);
@@ -1191,25 +1355,74 @@ function applyTransactionEntrySummary(root: StoryNode, nodes: StoryNode[]): void
   root.metrics.asyncTransactionScope = 'currentApexTransaction';
 }
 
-function attachDebugMessage(node: StoryNode | undefined, fields: string[], lineNumber: number, rawLine: string): void {
+function attachDebugMessage(node: StoryNode | undefined, fields: string[], lineNumber: number, rawLine: string): DebugMessage | undefined {
   if (!node) {
-    return;
+    return undefined;
   }
 
   const source = fields[0];
   const level = fields[1] || 'DEBUG';
   const message = fields.slice(2).join('|') || fields.at(-1) || rawLine;
+  const debugMessage = {
+    line: lineNumber,
+    level,
+    message,
+    source
+  };
   node.debugMessages = [
     ...(node.debugMessages ?? []),
-    {
-      line: lineNumber,
-      level,
-      message,
-      source
-    }
+    debugMessage
   ];
   node.metrics.debugMessages = node.debugMessages.length;
   node.lineEnd = Math.max(node.lineEnd, lineNumber);
+  return debugMessage;
+}
+
+function trackRecentDebugMessage(
+  messagesByParent: Map<string, DebugMessage[]>,
+  parentId: string,
+  message: DebugMessage
+): void {
+  const messages = messagesByParent.get(parentId) ?? [];
+  messages.push(message);
+  if (messages.length > 80) {
+    messages.splice(0, messages.length - 80);
+  }
+  messagesByParent.set(parentId, messages);
+}
+
+function collectRecentDebugTrail(
+  messages: DebugMessage[],
+  ownerSignature: string | undefined,
+  lineNumber: number
+): DebugMessage[] {
+  const ownerClass = ownerSignature?.split('.')[0];
+  if (!ownerClass) {
+    return [];
+  }
+
+  return messages
+    .filter((message) => message.line < lineNumber && message.message.includes(ownerClass))
+    .slice(-8);
+}
+
+function inferDebugAttributionSignature(
+  messages: DebugMessage[],
+  ownerSignature: string | undefined,
+  lineNumber: number
+): string | undefined {
+  const ownerClass = ownerSignature?.split('.')[0];
+  if (!ownerClass) {
+    return undefined;
+  }
+
+  return messages
+    .filter((message) => message.line < lineNumber && message.message.includes(ownerClass))
+    .map((message) => message.message.match(/\b([A-Z][A-Za-z0-9_]*\.[a-z][A-Za-z0-9_]*)\b/)?.[1])
+    .filter((signature): signature is string => Boolean(signature))
+    .map(normalizeBusinessSignature)
+    .filter((signature) => isBusinessBridgeMethod(signature) && signature !== ownerSignature)
+    [0];
 }
 
 function parseDebugContext(fields: string[], lineNumber: number, ns: number, parentId: string): DebugContext | undefined {
@@ -1231,8 +1444,7 @@ function buildDmlContextChain(
   debugContext: DebugContext | undefined,
   lineNumber: number,
   ns: number
-): { bridge: string[]; callerChain: string[]; source: string; confidence: string } {
-  const candidates = [...callerChain];
+): AttributionContext {
   const debugIsRecent =
     debugContext !== undefined &&
     lineNumber >= debugContext.line &&
@@ -1240,38 +1452,64 @@ function buildDmlContextChain(
     ns >= debugContext.ns &&
     ns - debugContext.ns <= 1_000_000_000;
 
-  if (debugIsRecent) {
-    candidates.push(debugContext.signature);
-  }
   if (profile) {
-    candidates.push(profile.signature);
+    const bridge = buildProfileBackedBridge(callerChain, profile.signature);
+    const debugSignature = debugIsRecent && isDebugSignatureRelevant(debugContext.signature, callerChain, profile.signature)
+      ? debugContext.signature
+      : undefined;
+    return {
+      bridge,
+      callerChain: uniqueBusinessSignatures([...callerChain, ...bridge]),
+      source: 'DML profiling',
+      graphSource: bridge.length > 0 ? 'Apex caller stack' : 'DML profiling source context',
+      confidence: 'high',
+      ownerSignature: profile.signature,
+      ...(debugSignature ? { debugSignature } : {})
+    };
   }
 
-  const bridge = selectBusinessMethodBridge(candidates);
-  const source = profile ? 'DML profiling' : debugIsRecent ? 'USER_DEBUG context' : bridge.length > 0 ? 'Apex caller stack' : 'No Apex method evidence';
+  if (debugIsRecent) {
+    return {
+      bridge: [],
+      callerChain: uniqueStrings(callerChain),
+      source: 'USER_DEBUG context',
+      confidence: 'medium',
+      ownerSignature: debugContext.signature,
+      debugSignature: debugContext.signature
+    };
+  }
+
+  const bridge = selectBusinessMethodBridge(callerChain);
   return {
     bridge,
     callerChain: uniqueStrings([...callerChain, ...bridge]),
-    source,
-    confidence: profile ? 'high' : debugIsRecent ? 'medium' : bridge.length > 0 ? 'low' : 'unknown'
+    source: bridge.length > 0 ? 'Apex caller stack' : 'No Apex method evidence',
+    confidence: bridge.length > 0 ? 'low' : 'unknown'
   };
 }
 
 function buildSoqlContextChain(
   callerChain: string[],
   profile: SoqlProfile | undefined
-): { bridge: string[]; callerChain: string[]; source: string; confidence: string } {
-  const candidates = [...callerChain];
+): AttributionContext {
   if (profile) {
-    candidates.push(profile.signature);
+    const bridge = buildProfileBackedBridge(callerChain, profile.signature);
+    return {
+      bridge,
+      callerChain: uniqueBusinessSignatures([...callerChain, ...bridge]),
+      source: 'SOQL profiling',
+      graphSource: bridge.length > 0 ? 'Apex caller stack' : 'SOQL profiling source context',
+      confidence: 'high',
+      ownerSignature: profile.signature
+    };
   }
 
-  const bridge = selectBusinessMethodBridge(candidates);
+  const bridge = selectBusinessMethodBridge(callerChain);
   return {
     bridge,
     callerChain: uniqueStrings([...callerChain, ...bridge]),
-    source: profile ? 'SOQL profiling' : bridge.length > 0 ? 'Apex caller stack' : 'Code unit context',
-    confidence: profile ? 'high' : bridge.length > 0 ? 'low' : 'unknown'
+    source: bridge.length > 0 ? 'Apex caller stack' : 'Code unit context',
+    confidence: bridge.length > 0 ? 'low' : 'unknown'
   };
 }
 
@@ -1279,31 +1517,54 @@ function buildEmailContextChain(
   callerChain: string[],
   sourceContext: SourceContext | undefined,
   sourceLine: number | undefined
-): { bridge: string[]; callerChain: string[]; source: string; confidence: string; ownerSignature?: string } {
-  const candidates = [...callerChain];
-  const apexLocation = sourceContext ? sourceContextSignature(sourceContext, sourceLine) : undefined;
-  if (apexLocation) {
-    candidates.push(apexLocation);
+): AttributionContext {
+  if (sourceContext) {
+    const sourceLocation = formatApexSourceLocationSignature(
+      sourceContext.className,
+      sourceLine ?? sourceContext.sourceLine
+    );
+    return {
+      bridge: [sourceLocation],
+      callerChain: uniqueStrings([...callerChain, sourceLocation]),
+      source: 'Apex source line context',
+      confidence: 'source line only',
+      ownerSignature: formatApexSourceLocation(sourceContext.className, sourceLine ?? sourceContext.sourceLine)
+    };
   }
 
-  const bridge = selectBusinessMethodBridge(candidates);
-  const source = sourceContext
-    ? 'Apex source line context'
-    : bridge.length > 0
-      ? 'Apex caller stack'
-      : 'Code unit context';
-
+  const bridge = selectBusinessMethodBridge(callerChain);
   return {
     bridge,
     callerChain: uniqueStrings([...callerChain, ...bridge]),
-    source,
-    confidence: sourceContext ? 'medium' : bridge.length > 0 ? 'low' : 'unknown',
-    ownerSignature: sourceContext ? formatApexSourceLocation(sourceContext.className, sourceLine ?? sourceContext.sourceLine) : undefined
+    source: bridge.length > 0 ? 'Apex caller stack' : 'Code unit context',
+    confidence: bridge.length > 0 ? 'low' : 'unknown'
   };
 }
 
-function selectBusinessMethodBridge(chain: string[], limit = 3): string[] {
-  return uniqueStrings(chain.map(normalizeBusinessSignature).filter(isBusinessBridgeMethod)).slice(-limit);
+function selectBusinessMethodBridge(chain: string[], limit = 16): string[] {
+  return uniqueBusinessSignatures(chain.filter(isBusinessBridgeMethod)).slice(-limit);
+}
+
+function buildProfileBackedBridge(callerChain: string[], ownerSignature: string | undefined, limit = 16): string[] {
+  const bridge = selectBusinessMethodBridge(callerChain, limit);
+  if (!ownerSignature || !isBusinessBridgeMethod(ownerSignature)) {
+    return bridge;
+  }
+  if (bridge.some((signature) => sameBusinessSignature(signature, ownerSignature))) {
+    return bridge;
+  }
+  return uniqueBusinessSignatures([...bridge, ownerSignature]).slice(-limit);
+}
+
+function isDebugSignatureRelevant(debugSignature: string, callerChain: string[], ownerSignature: string | undefined): boolean {
+  return (
+    (ownerSignature !== undefined && sameBusinessSignature(debugSignature, ownerSignature)) ||
+    callerChain.some((signature) => sameBusinessSignature(signature, debugSignature))
+  );
+}
+
+function sameBusinessSignature(left: string, right: string): boolean {
+  return normalizeBusinessSignature(left) === normalizeBusinessSignature(right);
 }
 
 function ensureMethodContextPath(
@@ -1317,17 +1578,36 @@ function ensureMethodContextPath(
   methodContextByKey: Map<string, string>
 ): string {
   let parentId = baseParentId;
+  const sourceContextOnly = source !== 'Apex caller stack' && source !== 'Exception stack';
 
   chain.forEach((signature) => {
-    const key = `${parentId}|${signature}`;
-    let node = nodeById.get(methodContextByKey.get(key) ?? '');
+    const keys = methodContextKeys(parentId, signature);
+    let node = keys.map((key) => nodeById.get(methodContextByKey.get(key) ?? '')).find(Boolean);
     if (!node) {
       node = addNode('method', compactSignature(signature), lineNumber, ns, parentId, {
         subtitle: classFromSignature(signature),
         detail: signature,
-        metrics: { signature, evidence: source }
+        metrics: {
+          signature,
+          evidence: source,
+          sourceContextOnly,
+          ...(/\.line\d+$/.test(signature) ? { sourceLineContext: true } : {})
+        }
       });
-      methodContextByKey.set(key, node.id);
+      const nodeId = node.id;
+      keys.forEach((key) => methodContextByKey.set(key, nodeId));
+    } else if (!sourceContextOnly && node.metrics.sourceContextOnly) {
+      node.metrics.sourceContextOnly = false;
+      node.metrics.evidence = source;
+    } else {
+      const existingSignature = String(node.metrics.signature ?? node.detail ?? '');
+      if (!existingSignature.includes('(') && signature.includes('(')) {
+        node.label = compactSignature(signature);
+        node.detail = signature;
+        node.metrics.signature = signature;
+      }
+      const nodeId = node.id;
+      keys.forEach((key) => methodContextByKey.set(key, nodeId));
     }
 
     node.lineEnd = Math.max(node.lineEnd, lineNumber);
@@ -1337,6 +1617,52 @@ function ensureMethodContextPath(
   });
 
   return parentId;
+}
+
+function methodContextKeys(parentId: string, signature: string): string[] {
+  const keys = [`${parentId}|${signature}`];
+  const normalized = normalizeBusinessSignature(signature);
+  if (normalized && normalized !== signature && isBusinessBridgeMethod(normalized)) {
+    keys.push(`${parentId}|${normalized}`);
+  }
+  return uniqueStrings(keys);
+}
+
+function bridgeNestedCodeUnitParent(
+  runtimeParentId: string,
+  codeUnitParentId: string,
+  activeDmlNode: StoryNode | undefined,
+  methodStack: StackFrame[],
+  lineNumber: number,
+  ns: number,
+  addNode: AddNode,
+  nodeById: Map<string, StoryNode>,
+  methodContextByKey: Map<string, string>
+): string {
+  if (activeDmlNode || runtimeParentId !== codeUnitParentId) {
+    return runtimeParentId;
+  }
+
+  const parent = nodeById.get(codeUnitParentId);
+  if (!parent || parent.kind === 'root') {
+    return runtimeParentId;
+  }
+
+  const bridge = selectBusinessMethodBridge(methodStack.map((frame) => frame.signature), 4);
+  if (bridge.length === 0) {
+    return runtimeParentId;
+  }
+
+  return ensureMethodContextPath(
+    runtimeParentId,
+    bridge,
+    lineNumber,
+    ns,
+    'Apex caller stack',
+    addNode,
+    nodeById,
+    methodContextByKey
+  );
 }
 
 function findRecentMatchingFlowElement(
@@ -1384,6 +1710,55 @@ function buildDmlProfileIndex(rawLines: string[]): Map<string, DmlProfile[]> {
   });
 
   return index;
+}
+
+function buildSourceAttributionPath({
+  parent,
+  callerBridge,
+  ownerSignature,
+  debugSignature,
+  eventLabel
+}: {
+  parent: StoryNode | undefined;
+  callerBridge?: string[];
+  ownerSignature: string | undefined;
+  debugSignature: string | undefined;
+  eventLabel: string;
+}): string[] {
+  if (!ownerSignature && !debugSignature) {
+    return [];
+  }
+
+  const path: string[] = [];
+  const parentLabel = parent?.label;
+  if (parentLabel && parent?.kind !== 'root') {
+    path.push(parentLabel);
+  }
+
+  callerBridge?.forEach((signature) => {
+    path.push(normalizeBusinessSignature(signature));
+  });
+  if (debugSignature) {
+    path.push(debugSignature);
+  }
+  if (ownerSignature) {
+    path.push(ownerSignature);
+  }
+  path.push(eventLabel);
+  return uniqueStrings(path);
+}
+
+function sourceContextBridgeFromAttributionPath(
+  path: string[],
+  parent: StoryNode | undefined,
+  eventLabel: string
+): string[] {
+  return uniqueStrings(
+    path
+      .filter((item) => item !== parent?.label && item !== eventLabel)
+      .map(normalizeBusinessSignature)
+      .filter(isBusinessBridgeMethod)
+  );
 }
 
 function parseDmlProfileLine(line: string): DmlProfile | undefined {
@@ -1580,6 +1955,20 @@ function uniqueStrings(values: string[]): string[] {
   return [...new Set(values.filter(Boolean))];
 }
 
+function uniqueBusinessSignatures(values: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  values.filter(Boolean).forEach((value) => {
+    const key = normalizeBusinessSignature(value);
+    if (!key || seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    out.push(value);
+  });
+  return out;
+}
+
 function collectExceptionStack(rawLines: string[], index: number): string[] {
   const immediate = collectImmediateExceptionStack(rawLines, index);
   if (immediate.length > 0) {
@@ -1602,17 +1991,17 @@ function attachPendingSoqlToExceptionOwner(
   parentId: string,
   exceptionBridge: string[],
   nodeById: Map<string, StoryNode>
-): void {
+): boolean {
   if (!pendingSoql || exceptionBridge.length === 0) {
-    return;
+    return false;
   }
   const node = nodeById.get(pendingSoql.id);
   if (!node || node.kind !== 'soql') {
-    return;
+    return false;
   }
   const sourceLine = Number(node.metrics.sourceLine ?? 0);
   if (apexLine !== undefined && sourceLine > 0 && sourceLine !== apexLine) {
-    return;
+    return false;
   }
 
   reparentNode(node, parentId, nodeById);
@@ -1620,6 +2009,81 @@ function attachPendingSoqlToExceptionOwner(
   node.metrics.attributionConfidence = 'high';
   node.metrics.ownerSignature = exceptionBridge.at(-1) ?? exceptionBridge[0];
   node.callerChain = uniqueStrings([...(node.callerChain ?? []), ...exceptionBridge]);
+  return true;
+}
+
+function pendingSoqlBelongsToException(
+  pendingSoql: PendingSoql | undefined,
+  apexLine: number | undefined,
+  nodeById: Map<string, StoryNode>
+): boolean {
+  if (!pendingSoql) {
+    return false;
+  }
+  const node = nodeById.get(pendingSoql.id);
+  if (!node || node.kind !== 'soql') {
+    return false;
+  }
+  const sourceLine = Number(node.metrics.sourceLine ?? 0);
+  return apexLine === undefined || sourceLine === 0 || sourceLine === apexLine;
+}
+
+function findExceptionStackParentId(
+  stack: string[],
+  lineNumber: number,
+  ns: number,
+  fallbackParentId: string,
+  nodeById: Map<string, StoryNode>
+): string {
+  const triggerName = stack
+    .map((frame) => frame.match(/^Trigger\.([A-Za-z0-9_]+)(?::|$)/)?.[1])
+    .find(Boolean);
+  if (!triggerName) {
+    return fallbackParentId;
+  }
+
+  const matchingTrigger = [...nodeById.values()]
+    .filter((node) => {
+      if (node.kind !== 'trigger' || String(node.metrics.triggerName ?? '') !== triggerName) {
+        return false;
+      }
+      const nodeEndNs = node.endNs ?? node.startNs;
+      return node.lineStart <= lineNumber && node.startNs <= ns && nodeEndNs <= ns;
+    })
+    .sort((left, right) => {
+      const rightEndNs = right.endNs ?? right.startNs;
+      const leftEndNs = left.endNs ?? left.startNs;
+      return rightEndNs - leftEndNs || right.lineStart - left.lineStart;
+    })[0];
+
+  return matchingTrigger?.id ?? fallbackParentId;
+}
+
+function exceptionStackFingerprint(exception: ExceptionDetail): string | undefined {
+  if (!exception.stack || exception.stack.length === 0) {
+    return undefined;
+  }
+  return [
+    exception.exceptionType.trim().toLowerCase(),
+    exception.message.trim().toLowerCase(),
+    ...exception.stack.map((frame) => frame.trim().toLowerCase())
+  ].join('|');
+}
+
+function mergeRepeatedExceptionNode(node: StoryNode, exception: ExceptionDetail, lineNumber: number, ns: number): void {
+  node.lineEnd = Math.max(node.lineEnd, lineNumber);
+  node.endNs = Math.max(node.endNs ?? node.startNs, ns);
+  node.durationMs = durationMs(node.startNs, node.endNs);
+  node.metrics.repeatedOccurrences = Number(node.metrics.repeatedOccurrences ?? 1) + 1;
+  if (exception.raw && !node.detail?.includes(exception.raw)) {
+    node.detail = `${node.detail ?? ''}\n${exception.raw}`.trim();
+  }
+  if (node.exception && exception.raw && !node.exception.raw.includes(exception.raw)) {
+    node.exception = {
+      ...node.exception,
+      raw: `${node.exception.raw}\n${exception.raw}`.trim()
+    };
+  }
 }
 
 function reparentNode(node: StoryNode, parentId: string, nodeById: Map<string, StoryNode>): void {
@@ -1854,6 +2318,138 @@ function flowRecordMutationOperation(elementType: string): PendingFlowRecordMuta
   return undefined;
 }
 
+function ensureFlowDecisionTrace(node: StoryNode, interviewId: string, decisionApiName: string, lineNumber: number): FlowDecisionTrace {
+  if (!node.flowDecision) {
+    node.flowDecision = {
+      decisionApiName,
+      interviewId,
+      outcomes: [],
+      selectedOutcomeCount: 0,
+      defaultOutcomeInferred: false,
+      confidence: 'low',
+      evidenceStartLine: lineNumber,
+      evidenceEndLine: lineNumber
+    };
+  }
+  node.flowDecision.evidenceStartLine = Math.min(node.flowDecision.evidenceStartLine, lineNumber);
+  node.flowDecision.evidenceEndLine = Math.max(node.flowDecision.evidenceEndLine, lineNumber);
+  node.metrics.flowDecision = true;
+  return node.flowDecision;
+}
+
+function appendFlowDecisionOutcome(
+  node: StoryNode,
+  outcomeApiName: string,
+  result: boolean,
+  connectorMatched: boolean | undefined,
+  lineNumber: number
+): void {
+  const trace = ensureFlowDecisionTrace(
+    node,
+    String(node.metrics.interviewId ?? ''),
+    String(node.metrics.apiName ?? node.label),
+    lineNumber
+  );
+  let outcome = trace.outcomes.find((candidate) => candidate.outcomeApiName === outcomeApiName);
+  if (!outcome) {
+    outcome = {
+      outcomeApiName,
+      result,
+      connectorMatched,
+      count: 0,
+      selectedCount: 0,
+      firstLine: lineNumber,
+      lastLine: lineNumber
+    };
+    trace.outcomes.push(outcome);
+  }
+  outcome.result = result;
+  outcome.connectorMatched = connectorMatched;
+  outcome.count += 1;
+  outcome.lastLine = lineNumber;
+  trace.evidenceEndLine = Math.max(trace.evidenceEndLine, lineNumber);
+  node.lineEnd = Math.max(node.lineEnd, lineNumber);
+
+  if (result) {
+    outcome.selectedCount += 1;
+    trace.selectedOutcomeApiName = outcomeApiName;
+    trace.selectedOutcomeCount += 1;
+    trace.defaultOutcomeInferred = false;
+    trace.confidence = 'high';
+    node.metrics.selectedOutcome = outcomeApiName;
+  }
+}
+
+function markFlowDecisionValueAssignment(node: StoryNode, outcomeApiName: string, value: boolean, lineNumber: number): void {
+  const trace = node.flowDecision;
+  const outcome = trace?.outcomes.find((candidate) => candidate.outcomeApiName === outcomeApiName);
+  if (!trace || !outcome) {
+    return;
+  }
+  outcome.valueAssignment = value;
+  outcome.lastLine = Math.max(outcome.lastLine, lineNumber);
+  trace.evidenceEndLine = Math.max(trace.evidenceEndLine, lineNumber);
+  node.lineEnd = Math.max(node.lineEnd, lineNumber);
+}
+
+function linkDecisionToNextElement(previousElement: StoryNode | undefined, nextElement: StoryNode, lineNumber: number): void {
+  if (!previousElement?.flowDecision || previousElement.id === nextElement.id) {
+    return;
+  }
+  const trace = previousElement.flowDecision;
+  if (trace.nextElementNodeId) {
+    return;
+  }
+  trace.nextElementNodeId = nextElement.id;
+  trace.nextElementApiName = String(nextElement.metrics.apiName ?? nextElement.label);
+  trace.nextElementType = String(nextElement.metrics.elementType ?? nextElement.subtitle ?? nextElement.kind);
+  trace.evidenceEndLine = Math.max(trace.evidenceEndLine, lineNumber);
+  if (!trace.selectedOutcomeApiName && trace.outcomes.length > 0 && trace.outcomes.every((outcome) => !outcome.result)) {
+    trace.defaultOutcomeInferred = true;
+    trace.confidence = 'medium';
+    previousElement.metrics.selectedOutcome = 'Default outcome';
+  }
+}
+
+function findLatestFlowDecisionNode(interviewId: string, nodeById: Map<string, StoryNode>, lineNumber: number): StoryNode | undefined {
+  return [...nodeById.values()]
+    .filter((node) =>
+      node.kind === 'flowElement' &&
+      node.metrics.interviewId === interviewId &&
+      node.metrics.elementType === 'FlowDecision' &&
+      node.lineStart <= lineNumber
+    )
+    .sort((a, b) => b.lineEnd - a.lineEnd || b.lineStart - a.lineStart)
+    [0];
+}
+
+function findLatestFlowElementNode(
+  elementType: string,
+  apiName: string,
+  nodeById: Map<string, StoryNode>,
+  lineNumber: number
+): StoryNode | undefined {
+  return [...nodeById.values()]
+    .filter((node) =>
+      (node.kind === 'flowElement' || node.kind === 'email') &&
+      node.metrics.elementType === elementType &&
+      node.metrics.apiName === apiName &&
+      node.lineStart <= lineNumber
+    )
+    .sort((a, b) => b.lineStart - a.lineStart || b.lineEnd - a.lineEnd)
+    [0];
+}
+
+function parseLogBoolean(value: string | undefined): boolean | undefined {
+  if (value === 'true') {
+    return true;
+  }
+  if (value === 'false') {
+    return false;
+  }
+  return undefined;
+}
+
 function flowElementLabel(elementType: string, apiName: string): string {
   const readableName = apiName.replace(/_+/g, ' ').trim() || 'Flow record action';
   const operation = flowRecordMutationOperation(elementType);
@@ -1939,9 +2535,20 @@ function inferGenericDmlObjects(nodes: StoryNode[], nodeById: Map<string, StoryN
       return;
     }
     const operation = String(node.metrics.operation ?? 'DML');
+    node.metrics.rawObjectName = String(node.metrics.objectName ?? 'SObject');
     node.metrics.objectName = inferredObject;
     node.metrics.objectNameInferred = true;
+    node.metrics.objectNameInference = 'Nested automation object';
     node.label = `${operation} ${inferredObject}`;
+    if (typeof node.metrics.sourceAttributionPath === 'string') {
+      const sourcePath = node.metrics.sourceAttributionPath
+        .split('|')
+        .filter(Boolean);
+      if (sourcePath.length > 0) {
+        sourcePath[sourcePath.length - 1] = node.label;
+        node.metrics.sourceAttributionPath = uniqueStrings(sourcePath).join('|');
+      }
+    }
     node.detail = node.detail ? `${node.detail}|InferredType:${inferredObject}` : `InferredType:${inferredObject}`;
   });
 }
@@ -2284,38 +2891,181 @@ function parseWorkflowEmailSent(fields: string[]): { reference?: string; recipie
 
 function parseCalloutRequest(eventType: string, fields: string[]): CalloutInfo {
   const text = fields.join('|');
+  const values = parseCalloutKeyValues(text);
   const endpoint = extractEndpoint(text);
-  const namedCredential = extractNamedCredential(text);
+  const namedCredential = values.get('Named Credential Name') ?? extractNamedCredential(text);
   const endpointHost = endpoint ? endpointDisplayHost(endpoint) : namedCredential;
-  const method = extractHttpMethod(text) ?? 'HTTP';
+  const method = values.get('Method')?.toUpperCase() ?? extractHttpMethod(text) ?? 'HTTP';
   const label = endpointHost ? `Callout to ${endpointHost}` : eventType === 'NAMED_CREDENTIAL_REQUEST' ? 'Named Credential Callout' : 'HTTP Callout';
   return {
     label,
     subtitle: `${method} request`,
+    rawText: text,
+    sourceLine: parseSourceLine(fields[0]),
     endpoint,
+    endpointRedacted: endpoint ? redactSensitiveEndpoint(endpoint) : undefined,
     endpointHost,
     method,
-    namedCredential
+    namedCredential,
+    namedCredentialId: values.get('Named Credential Id'),
+    namedCredentialName: values.get('Named Credential Name'),
+    externalCredentialType: values.get('External Credential Type'),
+    authorizationSummary: sanitizeAuthorizationSummary(values.get('HTTP Header Authorization')),
+    contentType: values.get('Content-Type'),
+    requestSizeBytes: readCalloutNumber(values.get('Request Size bytes')),
+    retryOn401: values.get('Retry on 401')
   };
 }
 
 function parseCalloutResponse(eventType: string, fields: string[]): CalloutInfo {
   const text = fields.join('|');
+  const values = parseCalloutKeyValues(text);
   const endpoint = extractEndpoint(text);
-  const namedCredential = extractNamedCredential(text);
+  const namedCredential = values.get('Named Credential Name') ?? extractNamedCredential(text);
   const endpointHost = endpoint ? endpointDisplayHost(endpoint) : namedCredential;
-  const statusCode = extractStatusCode(text);
-  const status = extractStatusText(text) ?? (statusCode ? `HTTP ${statusCode}` : undefined);
+  const statusCode = values.get('StatusCode') ?? values.get('Status Code') ?? extractStatusCode(text);
+  const status = values.get('Status') ?? extractStatusText(text) ?? (statusCode ? `HTTP ${statusCode}` : undefined);
   const label = endpointHost ? `Callout to ${endpointHost}` : eventType === 'NAMED_CREDENTIAL_RESPONSE' ? 'Named Credential Callout' : 'HTTP Callout';
   return {
     label,
     subtitle: status ?? 'response',
+    rawText: text,
+    sourceLine: parseSourceLine(fields[0]),
     endpoint,
+    endpointRedacted: endpoint ? redactSensitiveEndpoint(endpoint) : undefined,
     endpointHost,
     status,
     statusCode,
-    namedCredential
+    namedCredential,
+    namedCredentialId: values.get('Named Credential Id'),
+    namedCredentialName: values.get('Named Credential Name'),
+    contentType: values.get('Content-Type'),
+    responseSizeBytes: readCalloutNumber(values.get('Response Size bytes')),
+    overallCalloutTimeMs: readCalloutNumber(values.get('Overall Callout Time ms')),
+    connectTimeMs: readCalloutNumber(values.get('Connect Time ms'))
   };
+}
+
+function mergeCalloutRequestNode(node: StoryNode, callout: CalloutInfo, eventType: string, fields: string[], lineNumber: number): void {
+  node.label = callout.label || node.label;
+  node.subtitle = callout.subtitle || node.subtitle;
+  node.detail = `${node.detail ?? ''}\n${eventType}|${fields.join('|')}`.trim();
+  Object.assign(node.metrics, calloutRequestMetrics(callout, eventType, lineNumber));
+}
+
+function mergeCalloutResponseNode(
+  node: StoryNode,
+  response: CalloutInfo,
+  requestType: string,
+  eventType: string,
+  fields: string[],
+  lineNumber: number
+): void {
+  node.subtitle = response.subtitle || node.subtitle;
+  node.detail = `${node.detail ?? ''}\n${eventType}|${fields.join('|')}`.trim();
+  node.metrics.calloutType = requestType;
+  node.metrics.calloutStatus = 'response';
+  Object.assign(node.metrics, calloutResponseMetrics(response, eventType, lineNumber));
+  node.lineEnd = Math.max(node.lineEnd, lineNumber);
+}
+
+function calloutRequestMetrics(callout: CalloutInfo, eventType: string, lineNumber: number): Record<string, string | number | boolean> {
+  const isNamedCredential = eventType === 'NAMED_CREDENTIAL_REQUEST';
+  return compactMetricRecord({
+    ...(isNamedCredential
+      ? {
+          namedCredentialRequestEventType: eventType,
+          namedCredentialRequestLine: lineNumber,
+          namedCredentialRequestSourceLine: callout.sourceLine,
+          namedCredentialRequestSummary: callout.rawText
+        }
+      : {
+          requestEventType: eventType,
+          requestLine: lineNumber,
+          requestSourceLine: callout.sourceLine,
+          requestSummary: callout.rawText
+        }),
+    endpoint: callout.endpoint,
+    endpointRedacted: callout.endpointRedacted,
+    endpointHost: callout.endpointHost,
+    method: callout.method,
+    namedCredential: callout.namedCredential,
+    namedCredentialId: callout.namedCredentialId,
+    namedCredentialName: callout.namedCredentialName,
+    externalCredentialType: callout.externalCredentialType,
+    authorizationSummary: callout.authorizationSummary,
+    requestContentType: callout.contentType,
+    requestSizeBytes: callout.requestSizeBytes,
+    retryOn401: callout.retryOn401
+  });
+}
+
+function calloutResponseMetrics(response: CalloutInfo, eventType: string, lineNumber: number): Record<string, string | number | boolean> {
+  const isNamedCredential = eventType === 'NAMED_CREDENTIAL_RESPONSE';
+  return compactMetricRecord({
+    ...(isNamedCredential
+      ? {
+          namedCredentialResponseEventType: eventType,
+          namedCredentialResponseLine: lineNumber,
+          namedCredentialResponseSourceLine: response.sourceLine,
+          namedCredentialResponseSummary: response.rawText
+        }
+      : {
+          responseEventType: eventType,
+          responseLine: lineNumber,
+          responseSourceLine: response.sourceLine,
+          responseSummary: response.rawText
+        }),
+    endpoint: response.endpoint,
+    endpointRedacted: response.endpointRedacted,
+    endpointHost: response.endpointHost,
+    status: response.status,
+    statusCode: response.statusCode,
+    namedCredential: response.namedCredential,
+    namedCredentialId: response.namedCredentialId,
+    namedCredentialName: response.namedCredentialName,
+    responseContentType: response.contentType,
+    responseSizeBytes: response.responseSizeBytes,
+    overallCalloutTimeMs: response.overallCalloutTimeMs,
+    connectTimeMs: response.connectTimeMs
+  });
+}
+
+function compactMetricRecord(values: Record<string, string | number | boolean | undefined>): Record<string, string | number | boolean> {
+  return Object.fromEntries(Object.entries(values).filter(([, value]) => value !== undefined && value !== '')) as Record<string, string | number | boolean>;
+}
+
+function parseCalloutKeyValues(text: string): Map<string, string> {
+  const bracketStart = text.lastIndexOf('[');
+  const bracketText = (bracketStart >= 0 ? text.slice(bracketStart + 1) : text).replace(/\]$/, '');
+  const values = new Map<string, string>();
+  bracketText
+    .split(/,\s+(?=[A-Za-z][A-Za-z0-9\s-]*(?:=|:))/)
+    .map((part) => part.replace(/\]$/, '').trim())
+    .forEach((part) => {
+      const match = part.match(/^([^=]+)=([\s\S]*)$/);
+      if (!match) {
+        return;
+      }
+      values.set(match[1].trim(), match[2].trim());
+    });
+  return values;
+}
+
+function readCalloutNumber(value: string | undefined): number | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  const number = Number(value.match(/\d+(?:\.\d+)?/)?.[0]);
+  return Number.isFinite(number) ? number : undefined;
+}
+
+function sanitizeAuthorizationSummary(value: string | undefined): string | undefined {
+  return value
+    ?.replace(/Credential:\s*([^,\]]+)/i, (_match, credential: string) =>
+      /^Not set\b/i.test(credential.trim()) ? `Credential: ${credential.trim()}` : 'Credential: redacted'
+    )
+    .replace(/\b(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]+/gi, '$1 redacted');
 }
 
 function extractEndpoint(text: string): string | undefined {
@@ -2337,6 +3087,24 @@ function endpointDisplayHost(endpoint: string): string {
     return new URL(endpoint).host || endpoint;
   } catch {
     return endpoint.length > 72 ? `${endpoint.slice(0, 69)}...` : endpoint;
+  }
+}
+
+function redactSensitiveEndpoint(endpoint: string): string {
+  if (!/^https?:\/\//i.test(endpoint)) {
+    return endpoint;
+  }
+  try {
+    const url = new URL(endpoint);
+    const sensitiveKeyPattern = /(?:^|[_-])(key|token|secret|password|passwd|pwd|client_secret|access_token|refresh_token|authorization|api_key|apikey)(?:$|[_-])/i;
+    url.searchParams.forEach((_, key) => {
+      if (sensitiveKeyPattern.test(key)) {
+        url.searchParams.set(key, 'redacted');
+      }
+    });
+    return url.toString();
+  } catch {
+    return endpoint;
   }
 }
 
@@ -2591,17 +3359,21 @@ function inferApexClassFromSystemSignature(signature: string): string | undefine
   return match?.[1];
 }
 
-function sourceContextSignature(context: SourceContext, sourceLine: number | undefined): string {
-  return `${context.className}.line${sourceLine ?? context.sourceLine}`;
-}
-
 function formatApexSourceLocation(className: string, sourceLine: number): string {
   return `${className} line ${sourceLine}`;
 }
 
+function formatApexSourceLocationSignature(className: string, sourceLine: number): string {
+  return `${className}.line${sourceLine}`;
+}
+
 function ensureCallerPath(methodStack: StackFrame[], codeUnitStack: CodeUnitInfo[]): { parentId: string; chain: string[] } {
   const parentId = currentCodeUnitId(codeUnitStack);
-  const meaningful = methodStack.filter((frame) => isMeaningfulMethod(frame.signature)).slice(-5);
+  const currentCodeUnit = codeUnitStack[codeUnitStack.length - 1];
+  const codeUnitStartLine = currentCodeUnit?.startLine ?? 1;
+  const meaningful = methodStack
+    .filter((frame) => frame.line >= codeUnitStartLine && isMeaningfulMethod(frame.signature))
+    .slice(-16);
   return { parentId, chain: meaningful.map((frame) => frame.signature) };
 }
 

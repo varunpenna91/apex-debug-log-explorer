@@ -163,9 +163,14 @@ function sendPendingLog(targetPanel: vscode.WebviewPanel | undefined): void {
   if (!targetPanel || !pendingLog) {
     return;
   }
+  const logToSend = pendingLog;
   void targetPanel.webview.postMessage({
     type: 'loadLog',
-    ...pendingLog
+    ...logToSend
+  }).then((delivered) => {
+    if (delivered && pendingLog === logToSend) {
+      pendingLog = undefined;
+    }
   });
 }
 

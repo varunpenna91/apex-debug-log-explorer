@@ -37,6 +37,32 @@ export interface ExceptionDetail {
   stack?: string[];
 }
 
+export interface FlowDecisionOutcome {
+  outcomeApiName: string;
+  result: boolean;
+  connectorMatched?: boolean;
+  count: number;
+  selectedCount: number;
+  firstLine: number;
+  lastLine: number;
+  valueAssignment?: boolean;
+}
+
+export interface FlowDecisionTrace {
+  decisionApiName: string;
+  interviewId: string;
+  outcomes: FlowDecisionOutcome[];
+  selectedOutcomeApiName?: string;
+  selectedOutcomeCount: number;
+  defaultOutcomeInferred: boolean;
+  confidence: 'high' | 'medium' | 'low';
+  nextElementNodeId?: string;
+  nextElementApiName?: string;
+  nextElementType?: string;
+  evidenceStartLine: number;
+  evidenceEndLine: number;
+}
+
 export interface StoryNode {
   id: string;
   kind: NodeKind;
@@ -55,6 +81,7 @@ export interface StoryNode {
   callerChain?: string[];
   debugMessages?: DebugMessage[];
   exception?: ExceptionDetail;
+  flowDecision?: FlowDecisionTrace;
   loopMultiplier?: number;
 }
 

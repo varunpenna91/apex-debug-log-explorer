@@ -106,7 +106,7 @@ const KIND_STYLE: Record<NodeKind, { color: string; bg: string; label: string }>
   flowElement: { color: '#a9e8c5', bg: '#172e24', label: 'Flow element' },
   validation: { color: '#f7a6ff', bg: '#35183b', label: 'Validation' },
   workflow: { color: '#f4d35e', bg: '#3c3411', label: 'Workflow' },
-  method: { color: '#c9d4e6', bg: '#202936', label: 'Method' },
+  method: { color: '#93c5fd', bg: '#14263a', label: 'Method' },
   dml: { color: '#ff9f7a', bg: '#422016', label: 'DML' },
   soql: { color: '#7cc7ff', bg: '#112d42', label: 'SOQL' },
   exception: { color: '#ff6680', bg: '#431923', label: 'Error' },
@@ -115,8 +115,8 @@ const KIND_STYLE: Record<NodeKind, { color: string; bg: string; label: string }>
   callout: { color: '#60f0d0', bg: '#113633', label: 'Callout' },
   debug: { color: '#e6dd9b', bg: '#383316', label: 'Debug' },
   gap: { color: '#c4a7ff', bg: '#2c2141', label: 'Execution gap' },
-  limit: { color: '#b8c3d8', bg: '#252b36', label: 'Limit' },
-  codeUnit: { color: '#ccd5e5', bg: '#202936', label: 'Code unit' }
+  limit: { color: '#cbd5e1', bg: '#1f2937', label: 'Limit' },
+  codeUnit: { color: '#bfdbfe', bg: '#172536', label: 'Code unit' }
 };
 
 const DML_TONE_STYLE: Record<DmlTone, { color: string; bg: string }> = {
@@ -124,7 +124,7 @@ const DML_TONE_STYLE: Record<DmlTone, { color: string; bg: string }> = {
   automation: { color: '#ffcb7a', bg: '#3d2b12' },
   platform: { color: '#c7a6ff', bg: '#2c2141' },
   logging: { color: '#e6dd9b', bg: '#353017' },
-  system: { color: '#bac6d5', bg: '#252b36' }
+  system: { color: '#cbd5e1', bg: '#263140' }
 };
 
 const LIGHT_KIND_STYLE: Record<NodeKind, { color: string; bg: string; label: string }> = {
@@ -136,7 +136,7 @@ const LIGHT_KIND_STYLE: Record<NodeKind, { color: string; bg: string; label: str
   flowElement: { color: '#0d9488', bg: '#f0fdfa', label: 'Flow element' },
   validation: { color: '#c026d3', bg: '#fdf4ff', label: 'Validation' },
   workflow: { color: '#ca8a04', bg: '#fefce8', label: 'Workflow' },
-  method: { color: '#475569', bg: '#f8fafc', label: 'Method' },
+  method: { color: '#2563eb', bg: '#eff6ff', label: 'Method' },
   dml: { color: '#ea580c', bg: '#fff7ed', label: 'DML' },
   soql: { color: '#2563eb', bg: '#eff6ff', label: 'SOQL' },
   exception: { color: '#dc2626', bg: '#fef2f2', label: 'Error' },
@@ -145,8 +145,8 @@ const LIGHT_KIND_STYLE: Record<NodeKind, { color: string; bg: string; label: str
   callout: { color: '#0f766e', bg: '#f0fdfa', label: 'Callout' },
   debug: { color: '#65a30d', bg: '#f7fee7', label: 'Debug' },
   gap: { color: '#7c3aed', bg: '#f5f3ff', label: 'Execution gap' },
-  limit: { color: '#6b7280', bg: '#f3f4f6', label: 'Limit' },
-  codeUnit: { color: '#4b5563', bg: '#f3f4f6', label: 'Code unit' }
+  limit: { color: '#475569', bg: '#f8fafc', label: 'Limit' },
+  codeUnit: { color: '#1d4ed8', bg: '#eff6ff', label: 'Code unit' }
 };
 
 const LIGHT_DML_TONE_STYLE: Record<DmlTone, { color: string; bg: string }> = {
@@ -154,7 +154,7 @@ const LIGHT_DML_TONE_STYLE: Record<DmlTone, { color: string; bg: string }> = {
   automation: { color: '#ca8a04', bg: '#fef9c3' },
   platform: { color: '#7c3aed', bg: '#f5f3ff' },
   logging: { color: '#65a30d', bg: '#f7fee7' },
-  system: { color: '#4b5563', bg: '#f3f4f6' }
+  system: { color: '#475569', bg: '#f8fafc' }
 };
 
 type GraphNodeData = {
@@ -213,6 +213,7 @@ interface DmlImpactGroup {
 }
 
 interface FlowContext {
+  currentNodeKind: NodeKind;
   flowApiName?: string;
   runtimeObject?: string;
   interviewId?: string;
@@ -222,6 +223,7 @@ interface FlowContext {
   elementApiName?: string;
   elementType?: string;
   flowNode?: StoryNode;
+  immediateFlowElements: StoryNode[];
   flowInterviews: StoryNode[];
 }
 
@@ -566,8 +568,14 @@ function App() {
   const lastRawSearchRef = useRef<string>('');
   const visibleGraphRef = useRef<{ nodes: Node<GraphNodeData>[]; edges: Edge[] }>({ nodes: [], edges: [] });
   const vscodeBridgeRef = useRef<VsCodeBridge | null>(null);
+  const parseWorkerRef = useRef<Worker | null>(null);
+  const parseRequestIdRef = useRef(0);
 
   const parseText = useCallback((text: string, nextFileName: string) => {
+    parseWorkerRef.current?.terminate();
+    parseWorkerRef.current = null;
+    const requestId = parseRequestIdRef.current + 1;
+    parseRequestIdRef.current = requestId;
     setIsParsing(true);
     setParseError(null);
     setFileName(nextFileName);
@@ -601,6 +609,9 @@ function App() {
     lastRawSearchRef.current = '';
 
     const handleSuccess = (parsed: ParseResult) => {
+      if (parseRequestIdRef.current !== requestId) {
+        return;
+      }
       setResult(parsed);
       const firstMeaningful =
         parsed.nodes.find((node) => node.kind === 'dml') ??
@@ -627,6 +638,9 @@ function App() {
 
     const parseOnMainThread = (reason?: unknown) => {
       window.setTimeout(() => {
+        if (parseRequestIdRef.current !== requestId) {
+          return;
+        }
         try {
           handleSuccess(parseSalesforceLog(text));
         } catch (error) {
@@ -643,8 +657,16 @@ function App() {
       const worker = new Worker(new URL('./workers/logParser.worker.ts', import.meta.url), {
         type: 'module'
       });
+      parseWorkerRef.current = worker;
 
       worker.onmessage = (event: MessageEvent<WorkerParseResponse>) => {
+        if (parseRequestIdRef.current !== requestId) {
+          worker.terminate();
+          if (parseWorkerRef.current === worker) {
+            parseWorkerRef.current = null;
+          }
+          return;
+        }
         settled = true;
         if (event.data.type === 'success') {
           handleSuccess(event.data.result);
@@ -653,6 +675,9 @@ function App() {
           setIsParsing(false);
         }
         worker.terminate();
+        if (parseWorkerRef.current === worker) {
+          parseWorkerRef.current = null;
+        }
       };
 
       worker.onerror = (event) => {
@@ -662,6 +687,9 @@ function App() {
         }
         settled = true;
         worker.terminate();
+        if (parseWorkerRef.current === worker) {
+          parseWorkerRef.current = null;
+        }
         parseOnMainThread(new Error(event.message || 'The parser worker failed before it could analyze this log.'));
       };
 
@@ -669,6 +697,13 @@ function App() {
     } catch (workerError) {
       parseOnMainThread(workerError);
     }
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      parseWorkerRef.current?.terminate();
+      parseWorkerRef.current = null;
+    };
   }, []);
 
   const nodeById = useMemo(() => {
@@ -2341,6 +2376,7 @@ function StoryGraphNode({ data }: NodeProps<Node<GraphNodeData>>) {
   const isLightTheme = theme === 'light';
   const style = isLightTheme ? LIGHT_KIND_STYLE[storyNode.kind] : KIND_STYLE[storyNode.kind];
   const dmlClassification = storyNode.kind === 'dml' ? classifyDmlNode(storyNode, []) : null;
+  const decisionTrace = storyNode.flowDecision;
   const visualStyle = dmlClassification
     ? (isLightTheme ? LIGHT_DML_TONE_STYLE[dmlClassification.tone] : DML_TONE_STYLE[dmlClassification.tone])
     : style;
@@ -2348,10 +2384,13 @@ function StoryGraphNode({ data }: NodeProps<Node<GraphNodeData>>) {
   const hasDownstreamQueryLens =
     soqlLensEnabled && downstreamQuerySummary !== undefined && downstreamQuerySummary.executionCount > 0;
   const nextCue = childCount > 0 ? nextCueText(storyNode, childCount, selected, expanded) : null;
+  const sourceOwner = nodeSourceOwnerLabel(storyNode);
+  const displayLabel = graphNodeDisplayLabel(storyNode);
+  const displaySubtitle = graphNodeSubtitle(storyNode);
 
   return (
     <div
-      className={`graph-node kind-${storyNode.kind} relation-${relation} failure-${failureRole} risk-${riskLevel} ${selected ? 'selected' : ''} ${isDataOperationHighlighted ? 'data-op-highlight' : ''} ${dmlClassification ? `dml-${dmlClassification.tone}` : ''} ${hasQueryLens ? `soql-lens-node ${soqlLensTone(querySummary)}` : ''}`}
+      className={`graph-node kind-${storyNode.kind} relation-${relation} failure-${failureRole} risk-${riskLevel} ${selected ? 'selected' : ''} ${isDataOperationHighlighted ? 'data-op-highlight' : ''} ${dmlClassification ? `dml-${dmlClassification.tone}` : ''} ${decisionTrace ? 'flow-decision-node' : ''} ${hasQueryLens ? `soql-lens-node ${soqlLensTone(querySummary)}` : ''}`}
       style={{ '--node-color': visualStyle.color, '--node-bg': visualStyle.bg } as CSSProperties}
     >
       <Handle type="target" position={Position.Left} />
@@ -2367,8 +2406,23 @@ function StoryGraphNode({ data }: NodeProps<Node<GraphNodeData>>) {
         </span>
         <span className="node-line">L{storyNode.lineStart}</span>
       </div>
-      <div className="node-label">{storyNode.label}</div>
-      <div className="node-subtitle">{nodeSubtitle(storyNode)}</div>
+      <div className="node-label" title={storyNode.label}>{displayLabel}</div>
+      {displaySubtitle && <div className="node-subtitle" title={displaySubtitle}>{displaySubtitle}</div>}
+      {sourceOwner && (
+        <div className="node-source-row" title={`Salesforce profiling/source evidence points to ${String(storyNode.metrics.ownerSignature)}`}>
+          <Code2 size={10} />
+          <span>{sourceOwner}</span>
+        </div>
+      )}
+      {decisionTrace && (
+        <div
+          className={`node-decision-row confidence-${decisionTrace.confidence}`}
+          title={flowDecisionTooltip(storyNode)}
+        >
+          <GitBranch size={11} />
+          <span>{flowDecisionNodeLabel(storyNode)}</span>
+        </div>
+      )}
       {hasNodeVisualMetrics(storyNode) && (
         <div className="node-metrics-row">
           {Number(storyNode.metrics.soqlQueries || 0) > 0 && (
@@ -2844,10 +2898,12 @@ function Inspector({
   const hasExactQueryEvidence = localReads.length > 0 || downstreamReads.length > 0;
   const hasReportedQueryUsage = Number(selectedNode.metrics.soqlQueries ?? 0) > 0;
   const debugMessages = collectDebugMessages(selectedNode, nodeById);
+  const sourceAttributionPath = buildSourceAttributionPathItems(selectedNode);
+  const apexSignature = parseApexSignatureParts(graphNodeSignature(selectedNode));
   const explanation = explainNode(selectedNode, ancestors, descendants);
   const dmlImpact = selectedNode.kind === 'dml' ? buildDmlImpact(selectedNode, nodeById) : null;
   const flowContext = selectedNode.kind === 'flow' || selectedNode.kind === 'flowElement'
-    ? buildFlowContext(selectedNode, ancestors, descendants)
+    ? buildFlowContext(selectedNode, ancestors, descendants, nodeById)
     : null;
   const downstreamFailures = selectedNode.kind === 'exception'
     ? []
@@ -2859,7 +2915,7 @@ function Inspector({
       <div className="inspector-header">
         <span className="kind-badge" style={{ color: KIND_STYLE[selectedNode.kind].color, background: KIND_STYLE[selectedNode.kind].bg }}>
           <KindIcon kind={selectedNode.kind} />
-          {KIND_STYLE[selectedNode.kind].label}
+          {storyKindLabel(selectedNode, KIND_STYLE[selectedNode.kind].label)}
         </span>
         <h2>{selectedNode.label}</h2>
         <p>{selectedNode.subtitle || `line ${selectedNode.lineStart}`}</p>
@@ -2879,7 +2935,11 @@ function Inspector({
 
       {selectedNode.kind === 'callout' && <CalloutPanel node={selectedNode} ancestors={ancestors} />}
 
+      {apexSignature && <ApexSignaturePanel signature={apexSignature} />}
+
       {flowContext && <FlowContextPanel context={flowContext} onSelectNode={onSelectNode} />}
+
+      {selectedNode.flowDecision && <FlowDecisionPanel node={selectedNode} onSelectNode={onSelectNode} />}
 
       {dmlImpact && <DmlImpactPanel impact={dmlImpact} selectedNode={selectedNode} onSelectNode={onSelectNode} />}
 
@@ -2950,15 +3010,51 @@ function Inspector({
               'calloutType',
               'endpoint',
               'endpointHost',
+              'endpointRedacted',
               'method',
               'status',
               'statusCode',
               'namedCredential',
+              'namedCredentialId',
+              'namedCredentialName',
+              'requestEventType',
+              'requestLine',
+              'requestSourceLine',
+              'requestSummary',
+              'namedCredentialRequestEventType',
+              'namedCredentialRequestLine',
+              'namedCredentialRequestSourceLine',
+              'namedCredentialRequestSummary',
+              'responseEventType',
+              'responseLine',
+              'responseSourceLine',
+              'responseSummary',
+              'namedCredentialResponseEventType',
+              'namedCredentialResponseLine',
+              'namedCredentialResponseSourceLine',
+              'namedCredentialResponseSummary',
+              'externalCredentialType',
+              'authorizationSummary',
+              'requestContentType',
+              'requestSizeBytes',
+              'retryOn401',
+              'responseContentType',
+              'responseSizeBytes',
+              'overallCalloutTimeMs',
+              'connectTimeMs',
               'maxAsync',
               'maxAsyncLimit',
               'systemMethod',
               'transactionEntry',
-              'sourceName'
+              'sourceName',
+              'flowDecision',
+              'selectedOutcome',
+              'debugSignature',
+              'sourceAttributionPath',
+              'sourceAttributionConfidence',
+              'rawObjectName',
+              'objectNameInferred',
+              'objectNameInference'
             ]);
             const generalMetrics = Object.entries(selectedNode.metrics).filter(
               ([key]) => !EXCLUDED_METRIC_KEYS.has(key) && !key.startsWith('entry_') && !key.endsWith('Snapshot')
@@ -3026,6 +3122,23 @@ function Inspector({
               <div className="debug-more">+{formatNumber(debugMessages.length - 12)} more debug messages in this selection</div>
             )}
           </div>
+        </div>
+      )}
+
+      {sourceAttributionPath.length > 0 && (
+        <div className="inspector-section source-attribution-section">
+          <div className="section-title">
+            <GitBranch size={16} />
+            Source attribution path
+          </div>
+          <p className="section-caption">
+            Built from runtime context, USER_DEBUG messages, and cumulative profiling. This is evidence for ownership, not a METHOD_ENTRY call stack.
+          </p>
+          <ol className="compact-chain">
+            {sourceAttributionPath.map((item, index) => (
+              <li key={`${item}-${index}`}>{item}</li>
+            ))}
+          </ol>
         </div>
       )}
 
@@ -3219,9 +3332,30 @@ function ExceptionStoryPanel({
         </div>
       </div>
 
+      {context.executionPath.length > 0 && (
+        <div className="impact-block">
+          <span className="impact-block-title">Execution path to failure</span>
+          <div className="failure-path-list">
+            {context.executionPath.map((pathNode, index) => (
+              <button
+                key={pathNode.id}
+                type="button"
+                className={`failure-path-step ${pathNode.kind === 'exception' ? 'is-source' : ''}`}
+                onClick={() => onSelectNode(pathNode.id)}
+                title={`Inspect ${pathNode.label}`}
+              >
+                <span>{index + 1}</span>
+                <KindIcon kind={pathNode.kind} />
+                <strong>{pathNode.label}</strong>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {context.travelPath.length > 0 && (
         <div className="impact-block">
-          <span className="impact-block-title">Travel path to failure</span>
+          <span className="impact-block-title">Apex stack trace</span>
           <ol className="compact-chain travel-chain">
             {context.travelPath.map((frame) => (
               <li key={frame}>{frame}</li>
@@ -3352,6 +3486,7 @@ function EmailSendPanel({ node, ancestors }: { node: StoryNode; ancestors: Story
   const systemMethod = metricText(node.metrics.systemMethod) ?? node.detail;
   const caller = callerSummary(node) ?? ancestors.find((ancestor) => ancestor.kind === 'method')?.label;
   const evidence = systemMethod ?? metricText(node.metrics.reference) ?? metricText(node.metrics.apiName);
+  const sourceLineOnly = node.metrics.attributionConfidence === 'source line only';
 
   return (
     <div className="inspector-section email-send-panel">
@@ -3370,7 +3505,7 @@ function EmailSendPanel({ node, ancestors }: { node: StoryNode; ancestors: Story
       <div className="metric-list async-evidence-list">
         {caller && (
           <div className="metric-row">
-            <span>Caller</span>
+            <span>{sourceLineOnly ? 'Source context' : 'Caller'}</span>
             <strong>{caller}</strong>
           </div>
         )}
@@ -3398,11 +3533,17 @@ function EmailSendPanel({ node, ancestors }: { node: StoryNode; ancestors: Story
 }
 
 function CalloutPanel({ node, ancestors }: { node: StoryNode; ancestors: StoryNode[] }) {
-  const endpoint = metricText(node.metrics.endpoint) ?? metricText(node.metrics.endpointHost) ?? 'External endpoint';
+  const endpoint = metricText(node.metrics.endpointRedacted) ?? metricText(node.metrics.endpoint) ?? metricText(node.metrics.endpointHost) ?? 'External endpoint';
   const method = metricText(node.metrics.method) ?? 'HTTP';
   const status = metricText(node.metrics.statusCode) ?? metricText(node.metrics.status) ?? 'request captured';
   const caller = callerSummary(node) ?? ancestors.find((ancestor) => ancestor.kind === 'method')?.label;
   const namedCredential = metricText(node.metrics.namedCredential);
+  const requestRows = calloutRequestRows(node);
+  const responseRows = calloutResponseRows(node);
+  const requestSummary = metricText(node.metrics.requestSummary);
+  const namedRequestSummary = metricText(node.metrics.namedCredentialRequestSummary);
+  const responseSummary = metricText(node.metrics.responseSummary);
+  const namedResponseSummary = metricText(node.metrics.namedCredentialResponseSummary);
 
   return (
     <div className="inspector-section callout-panel">
@@ -3415,7 +3556,7 @@ function CalloutPanel({ node, ancestors }: { node: StoryNode; ancestors: StoryNo
       </p>
       <div className="query-summary-grid">
         <InlineStat label="Method" value={method} />
-        <InlineStat label="Status" value={status} />
+        <InlineStat label="Status code" value={status} />
         <InlineStat label="Duration" value={formatMs(node.durationMs ?? 0)} />
       </div>
       <div className="metric-list async-evidence-list">
@@ -3436,12 +3577,113 @@ function CalloutPanel({ node, ancestors }: { node: StoryNode; ancestors: StoryNo
           </div>
         )}
       </div>
+      {requestRows.length > 0 && <CalloutDetailBlock title="Request" rows={requestRows} summaries={[requestSummary, namedRequestSummary]} />}
+      {responseRows.length > 0 && <CalloutDetailBlock title="Response" rows={responseRows} summaries={[namedResponseSummary, responseSummary]} />}
     </div>
   );
 }
 
+function ApexSignaturePanel({ signature }: { signature: { className: string; method: string; params?: string } }) {
+  return (
+    <div className="inspector-section">
+      <div className="section-title">
+        <Code2 size={16} />
+        Apex signature
+      </div>
+      <div className="metric-list">
+        <div className="metric-row">
+          <span>Class</span>
+          <strong>{signature.className}</strong>
+        </div>
+        <div className="metric-row">
+          <span>Method</span>
+          <strong>{signature.method}</strong>
+        </div>
+        {signature.params !== undefined && (
+          <div className="metric-row">
+            <span>Parameters</span>
+            <strong>{signature.params || 'none'}</strong>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function CalloutDetailBlock({ title, rows, summaries }: { title: string; rows: Array<[string, string]>; summaries: Array<string | undefined> }) {
+  const visibleSummaries = summaries.filter((summary): summary is string => Boolean(summary));
+  return (
+    <div className="callout-detail-block">
+      <span className="impact-block-title">{title}</span>
+      <div className="metric-list">
+        {rows.map(([label, value]) => (
+          <div key={`${title}-${label}`} className="metric-row">
+            <span>{label}</span>
+            <strong>{value}</strong>
+          </div>
+        ))}
+      </div>
+      {visibleSummaries.map((summary, index) => (
+        <code key={`${title}-summary-${index}`} className="callout-raw-summary">
+          {summary}
+        </code>
+      ))}
+    </div>
+  );
+}
+
+function calloutRequestRows(node: StoryNode): Array<[string, string]> {
+  return compactRows([
+    ['Apex source line', metricText(node.metrics.requestSourceLine)],
+    ['Event line', metricText(node.metrics.requestLine)],
+    ['Event type', metricText(node.metrics.requestEventType)],
+    ['Named credential event line', metricText(node.metrics.namedCredentialRequestLine)],
+    ['Named credential event type', metricText(node.metrics.namedCredentialRequestEventType)],
+    ['Method', metricText(node.metrics.method)],
+    ['Endpoint', metricText(node.metrics.endpointRedacted) ?? metricText(node.metrics.endpoint)],
+    ['Request content type', metricText(node.metrics.requestContentType)],
+    ['Request size', formatMetricBytes(node.metrics.requestSizeBytes)],
+    ['Retry on 401', metricText(node.metrics.retryOn401)],
+    ['External credential type', metricText(node.metrics.externalCredentialType)],
+    ['Authorization', metricText(node.metrics.authorizationSummary)]
+  ]);
+}
+
+function calloutResponseRows(node: StoryNode): Array<[string, string]> {
+  return compactRows([
+    ['Apex source line', metricText(node.metrics.responseSourceLine)],
+    ['Event line', metricText(node.metrics.responseLine)],
+    ['Event type', metricText(node.metrics.responseEventType)],
+    ['Named credential event line', metricText(node.metrics.namedCredentialResponseLine)],
+    ['Named credential event type', metricText(node.metrics.namedCredentialResponseEventType)],
+    ['Status', metricText(node.metrics.status)],
+    ['Status code', metricText(node.metrics.statusCode)],
+    ['Response content type', metricText(node.metrics.responseContentType)],
+    ['Response size', formatMetricBytes(node.metrics.responseSizeBytes)],
+    ['Overall callout time', formatMetricMs(node.metrics.overallCalloutTimeMs)],
+    ['Connect time', formatMetricMs(node.metrics.connectTimeMs)]
+  ]);
+}
+
+function compactRows(rows: Array<[string, string | undefined]>): Array<[string, string]> {
+  return rows.filter((row): row is [string, string] => Boolean(row[1]));
+}
+
+function formatMetricBytes(value: unknown): string | undefined {
+  const number = Number(value);
+  return Number.isFinite(number) ? formatBytes(number) : undefined;
+}
+
+function formatMetricMs(value: unknown): string | undefined {
+  const number = Number(value);
+  return Number.isFinite(number) ? formatMs(number) : undefined;
+}
+
 function emailSendDescription(node: StoryNode, emailType: string): string {
   if (emailType === 'Apex Messaging') {
+    if (node.metrics.attributionConfidence === 'source line only') {
+      return `${node.label} was invoked through the Salesforce Messaging email API. Salesforce did not emit a real Apex method stack for this send, so the Email tab jumps to the observed source context instead of presenting it as a proven caller chain.`;
+    }
     return `${node.label} was invoked through the Salesforce Messaging email API. The Email tab groups these sends by API so you can jump back to the Apex caller that requested the email.`;
   }
   if (emailType === 'Workflow Email Alert') {
@@ -3601,8 +3843,32 @@ function MissingQueryEvidencePanel({ node }: { node: StoryNode }) {
 }
 
 function FlowContextPanel({ context, onSelectNode }: { context: FlowContext; onSelectNode: (id: string) => void }) {
-  const hasOwningFlowLink = Boolean(context.flowNode && context.flowNode.id !== context.flowInterviews[0]?.id);
+  const hasOwningFlowLink = context.currentNodeKind === 'flowElement' && Boolean(context.flowNode);
   const isRuntimeOnly = Boolean(context.runtimeObject) && !context.flowApiName;
+  const contextLabel = isRuntimeOnly
+    ? 'Runtime scope'
+    : context.currentNodeKind === 'flow'
+      ? 'This Flow interview'
+      : context.currentNodeKind === 'flowElement'
+        ? 'Owning Flow interview'
+        : 'Flow API name';
+  const contextHelp = isRuntimeOnly
+    ? 'Salesforce emitted a Flow runtime code unit. It is not a specific Flow interview.'
+    : context.currentNodeKind === 'flow'
+      ? 'A Flow interview is one run of this Flow. Expand this node to see the Flow elements that ran inside it.'
+      : context.currentNodeKind === 'flowElement'
+        ? 'This element is a step inside the owning Flow interview.'
+        : undefined;
+  const downstreamFlowTitle = context.currentNodeKind === 'flowRuntime'
+    ? 'Flow interviews in this runtime'
+    : context.currentNodeKind === 'flow'
+      ? 'Later Flow interviews downstream'
+      : 'Later Flow interviews downstream from this element';
+  const downstreamFlowDescription = context.currentNodeKind === 'flow'
+    ? 'These are separate Flow interviews that appeared later under this branch. They are not elements inside the selected Flow.'
+    : context.currentNodeKind === 'flowRuntime'
+      ? 'These are the actual Flow interviews Salesforce started inside this record-triggered runtime.'
+      : 'These are separate Flow interviews that appeared later after this selected Flow element.';
 
   return (
     <div className="inspector-section flow-context">
@@ -3612,15 +3878,12 @@ function FlowContextPanel({ context, onSelectNode }: { context: FlowContext; onS
       </div>
 
       <div className="flow-context-card">
-        <span>{isRuntimeOnly ? 'Runtime scope' : 'Flow API name'}</span>
+        <span>{contextLabel}</span>
         <strong>{isRuntimeOnly ? `${context.runtimeObject} record-triggered Flow runtime` : context.flowApiName ?? 'Not emitted in this log segment'}</strong>
-        {context.runtimeObject && (
-          <small>
-            {isRuntimeOnly
-              ? 'Salesforce emitted a Flow runtime code unit. It is not a specific Flow interview.'
-              : `Record-triggered runtime object: ${context.runtimeObject}`}
-          </small>
-        )}
+        <small>
+          {contextHelp}
+          {!isRuntimeOnly && context.runtimeObject ? ` Record-triggered object: ${context.runtimeObject}.` : ''}
+        </small>
       </div>
 
       <div className="metric-list">
@@ -3662,6 +3925,29 @@ function FlowContextPanel({ context, onSelectNode }: { context: FlowContext; onS
         )}
       </div>
 
+      {context.immediateFlowElements.length > 0 && (
+        <div className="impact-block">
+          <span className="impact-block-title">Flow elements in this interview</span>
+          <p className="section-description">These are the steps Salesforce executed inside this Flow run.</p>
+          <div className="impact-list compact">
+            {context.immediateFlowElements.slice(0, 8).map((element) => (
+              <button key={element.id} type="button" className="node-line-item clickable" onClick={() => onSelectNode(element.id)}>
+                <KindIcon kind={element.kind} />
+                <span>
+                  <strong>{element.label}</strong>
+                  <small>
+                    {String(element.metrics.elementType ?? element.subtitle ?? 'Flow element')} · line {element.lineStart}
+                  </small>
+                </span>
+              </button>
+            ))}
+            {context.immediateFlowElements.length > 8 && (
+              <div className="debug-more">+{formatNumber(context.immediateFlowElements.length - 8)} more Flow elements</div>
+            )}
+          </div>
+        </div>
+      )}
+
       {hasOwningFlowLink && context.flowNode && (
         <div className="impact-block">
           <span className="impact-block-title">Owning flow interview</span>
@@ -3680,7 +3966,8 @@ function FlowContextPanel({ context, onSelectNode }: { context: FlowContext; onS
 
       {context.flowInterviews.length > 0 && (
         <div className="impact-block">
-          <span className="impact-block-title">Flow interviews below this runtime</span>
+          <span className="impact-block-title">{downstreamFlowTitle}</span>
+          <p className="section-description">{downstreamFlowDescription}</p>
           <div className="impact-list compact">
             {context.flowInterviews.slice(0, 8).map((flow) => (
               <button key={flow.id} type="button" className="node-line-item clickable" onClick={() => onSelectNode(flow.id)}>
@@ -3698,6 +3985,88 @@ function FlowContextPanel({ context, onSelectNode }: { context: FlowContext; onS
               <div className="debug-more">+{formatNumber(context.flowInterviews.length - 8)} more flow interviews</div>
             )}
           </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function FlowDecisionPanel({ node, onSelectNode }: { node: StoryNode; onSelectNode: (id: string) => void }) {
+  const trace = node.flowDecision;
+  if (!trace) {
+    return null;
+  }
+  const selectedLabel = trace.defaultOutcomeInferred
+    ? 'Default outcome'
+    : trace.selectedOutcomeApiName ?? 'No outcome continued execution';
+  const nextElementLabel = trace.nextElementApiName
+    ? `${trace.nextElementApiName}${trace.nextElementType ? ` (${trace.nextElementType})` : ''}`
+    : 'No next Flow element was emitted after this decision.';
+  const selectedCountText = trace.selectedOutcomeCount > 1 ? ` · ${formatNumber(trace.selectedOutcomeCount)} times` : '';
+
+  return (
+    <div className="inspector-section flow-decision-panel">
+      <div className="section-title">
+        <GitBranch size={16} />
+        Flow decision
+      </div>
+
+      <div className="flow-decision-summary">
+        <span>Selected outcome</span>
+        <strong>{selectedLabel}{selectedCountText}</strong>
+        <small>
+          {trace.confidence === 'high'
+            ? 'Confirmed by FLOW_RULE_DETAIL / FLOW_VALUE_ASSIGNMENT in the debug log.'
+            : trace.defaultOutcomeInferred
+              ? 'Inferred because all explicit outcomes were false and the Flow continued to the next emitted element.'
+              : 'The log emitted the decision element, but not enough detail to confirm the selected outcome.'}
+        </small>
+      </div>
+
+      <div className="metric-list">
+        <div className="metric-row">
+          <span>Decision API name</span>
+          <strong>{trace.decisionApiName}</strong>
+        </div>
+        <div className="metric-row">
+          <span>Next executed element</span>
+          <strong>{nextElementLabel}</strong>
+        </div>
+        <div className="metric-row">
+          <span>Evidence lines</span>
+          <strong>
+            {trace.evidenceStartLine === trace.evidenceEndLine
+              ? trace.evidenceStartLine
+              : `${trace.evidenceStartLine}-${trace.evidenceEndLine}`}
+          </strong>
+        </div>
+      </div>
+
+      {trace.nextElementNodeId && (
+        <button type="button" className="decision-next-button" onClick={() => onSelectNode(trace.nextElementNodeId!)}>
+          <Workflow size={14} />
+          Inspect next Flow element
+        </button>
+      )}
+
+      {trace.outcomes.length > 0 && (
+        <div className="decision-outcome-list">
+          {trace.outcomes.map((outcome) => {
+            const isSelected = outcome.selectedCount > 0 || (!trace.selectedOutcomeApiName && trace.defaultOutcomeInferred && !outcome.result);
+            return (
+              <div key={outcome.outcomeApiName} className={`decision-outcome-row ${outcome.result ? 'result-true' : 'result-false'} ${isSelected && outcome.result ? 'selected' : ''}`}>
+                <span className="decision-outcome-status">{outcome.result ? 'true' : 'false'}</span>
+                <span className="decision-outcome-main">
+                  <strong>{outcome.outcomeApiName}</strong>
+                  <small>
+                    line {outcome.firstLine}
+                    {outcome.count > 1 ? ` · evaluated ${formatNumber(outcome.count)} times` : ''}
+                    {outcome.selectedCount > 1 ? ` · true ${formatNumber(outcome.selectedCount)} times` : ''}
+                  </small>
+                </span>
+              </div>
+            );
+          })}
         </div>
       )}
     </div>
@@ -3733,14 +4102,15 @@ function nextCueText(node: StoryNode, childCount: number, selected: boolean, exp
 }
 
 function shouldAutoSelectFirstChild(node: StoryNode): boolean {
-  return node.kind !== 'flow' && node.kind !== 'flowElement';
+  return !['flow', 'flowElement', 'dml', 'soql', 'email', 'exception', 'callout'].includes(node.kind);
 }
 
 function DmlImpactPanel({ impact, selectedNode, onSelectNode }: { impact: DmlImpact; selectedNode: StoryNode; onSelectNode: (id: string) => void }) {
-  const { classification, directAutomation, automationGroups, failureNodes, previousMeaningful, nextMeaningful, counts } = impact;
+  const { classification, directAutomation, automationGroups, failureNodes, previousMeaningful, counts } = impact;
   const hasAutomation = automationGroups.length > 0;
   const objectName = String(selectedNode.metrics.objectName ?? 'SObject');
   const operation = String(selectedNode.metrics.operation ?? 'DML');
+  const inferredObjectNote = dmlObjectInferenceNote(selectedNode);
 
   return (
     <div className={`inspector-section dml-impact impact-${classification.tone}`}>
@@ -3756,6 +4126,7 @@ function DmlImpactPanel({ impact, selectedNode, onSelectNode }: { impact: DmlImp
             {operation} {objectName}
           </h3>
           <p>{impact.summary}</p>
+          {inferredObjectNote && <p className="impact-evidence-note">{inferredObjectNote}</p>}
         </div>
         <div className="impact-badges">
           {classification.badges.map((badge) => (
@@ -3795,7 +4166,7 @@ function DmlImpactPanel({ impact, selectedNode, onSelectNode }: { impact: DmlImp
         <JourneyStop title="Before this DML" node={previousMeaningful} fallback="No earlier record event nearby." onClick={onSelectNode} />
         <JourneyStop
           title={failureNodes.length > 0 ? 'Failure path' : 'After this DML'}
-          node={failureNodes[0] ?? directAutomation[0] ?? nextMeaningful}
+          node={failureNodes[0] ?? directAutomation[0]}
           fallback="No downstream automation observed."
           onClick={onSelectNode}
         />
@@ -4370,6 +4741,7 @@ function buildFlowGraph(
 
     if ((parentExpanded || selected || expandedIds.has(node.id)) && isGraphCandidate(node, enabledKinds, normalized, byId)) {
       visibleIds.add(node.id);
+      addAncestors(node.id);
     }
   });
 
@@ -4412,7 +4784,7 @@ function buildFlowGraph(
       }
     });
   }
-  const edgePairs = visibleNodes
+  const rawHierarchyEdgePairs = visibleNodes
     .map((node) => {
       const source = nearestVisibleParent(node, byId, visibleIds);
       if (!source) {
@@ -4421,8 +4793,24 @@ function buildFlowGraph(
       return { source, target: node };
     })
     .filter(Boolean) as Array<{ source: StoryNode; target: StoryNode }>;
+  const decisionEdgePairs = visibleNodes
+    .map((source) => {
+      const targetId = source.flowDecision?.nextElementNodeId;
+      const target = targetId && visibleIds.has(targetId) ? byId.get(targetId) : undefined;
+      if (!target || source.id === target.id) {
+        return null;
+      }
+      return { source, target };
+    })
+    .filter(Boolean) as Array<{ source: StoryNode; target: StoryNode }>;
+  const decisionTargetIds = new Set(decisionEdgePairs.map(({ target }) => target.id));
+  const hierarchyEdgePairs = rawHierarchyEdgePairs.filter(
+    ({ source, target }) => !(source.kind === 'flow' && decisionTargetIds.has(target.id))
+  );
+  const decisionEdgeKeys = new Set(decisionEdgePairs.map(({ source, target }) => `${source.id}->${target.id}`));
+  const edgePairs = [...hierarchyEdgePairs, ...decisionEdgePairs];
   const executionOrderById = buildExecutionOrderMap(storyNodes);
-  const siblingOrderById = buildSiblingOrderMap(edgePairs);
+  const siblingOrderById = buildSiblingOrderMap(hierarchyEdgePairs);
   const visibleFailureEdges = failureContext ? visibleFailureEdgeIds(failureContext.pathIds, visibleIds, byId) : new Set<string>();
 
   const hasVisibleQueryLens = soqlLensEnabled && (querySummaryById.size > 0 || downstreamQuerySummaryById.size > 0);
@@ -4515,12 +4903,18 @@ function buildFlowGraph(
       const activeColor = isLightTheme ? LIGHT_KIND_STYLE[target.kind].color : KIND_STYLE[target.kind].color;
       const siblingOrder = siblingOrderById.get(target.id);
       const orderLabelSourceId = activeRevealSourceId && byId.has(activeRevealSourceId) ? activeRevealSourceId : selectedId;
-      const showOrderLabel = Boolean(siblingOrder && siblingOrder.total > 1 && source.id === orderLabelSourceId);
+      const isDecisionEdge = decisionEdgeKeys.has(`${source.id}->${target.id}`);
+      const isSourceContextEdge = isInferredSourceContextEdge(source, target);
+      const showOrderLabel = !isDecisionEdge && Boolean(siblingOrder && siblingOrder.total > 1 && source.id === orderLabelSourceId);
       const isFailureEdge = visibleFailureEdges.has(`${source.id}->${target.id}`);
       const edgeRelationName = edgeRelation(source.id, target.id, context);
-      const edgeColor = isFailureEdge ? (isLightTheme ? '#dc2626' : '#ff6680') : activeColor;
+      const edgeColor = isFailureEdge
+        ? (isLightTheme ? '#dc2626' : '#ff6680')
+        : isDecisionEdge
+          ? (isLightTheme ? '#047857' : '#8ef0c0')
+          : activeColor;
       return {
-        id: `${source.id}-${target.id}`,
+        id: isDecisionEdge ? `decision-${source.id}-${target.id}` : `${source.id}-${target.id}`,
         source: source.id,
         target: target.id,
         label: showOrderLabel ? String(siblingOrder?.index) : undefined,
@@ -4535,20 +4929,37 @@ function buildFlowGraph(
         labelBgStyle: {
           fill: isLightTheme ? '#ffffff' : '#101923',
           fillOpacity: 0.95,
-          stroke: activeColor,
+          stroke: edgeColor,
           strokeWidth: 1
         },
-        animated: isFailureEdge || target.kind === 'dml' || target.kind === 'exception',
-        className: `story-edge edge-${edgeRelationName} ${isFailureEdge ? 'edge-failure-path' : ''}`,
+        animated: isDecisionEdge || isFailureEdge || target.kind === 'dml' || target.kind === 'exception',
+        className: `story-edge edge-${edgeRelationName} ${isDecisionEdge ? 'edge-flow-decision' : ''} ${isFailureEdge ? 'edge-failure-path' : ''} ${isSourceContextEdge ? 'edge-source-context' : ''}`,
         style: {
           stroke: edgeColor,
-          strokeWidth: isFailureEdge ? 2.8 : selectedId === target.id || selectedId === source.id ? 2.4 : 1.4
+          strokeWidth: isFailureEdge ? 2.8 : isDecisionEdge ? 2.5 : isSourceContextEdge ? 1.5 : selectedId === target.id || selectedId === source.id ? 2.4 : 1.4
         }
       } satisfies Edge;
     })
     .filter(Boolean);
 
   return { nodes: flowNodes, edges };
+}
+
+function isInferredSourceContextEdge(source: StoryNode, target: StoryNode): boolean {
+  if (target.kind === 'method') {
+    return Boolean(target.metrics.sourceContextOnly) && source.kind !== 'method';
+  }
+
+  const attribution = metricText(target.metrics.attribution);
+  const confidence = metricText(target.metrics.attributionConfidence);
+  const hasSourceOwner = Boolean(metricText(target.metrics.ownerSignature));
+  return hasSourceOwner && (
+    confidence === 'source line only' ||
+    attribution === 'SOQL profiling' ||
+    attribution === 'DML profiling' ||
+    attribution === 'USER_DEBUG context' ||
+    attribution === 'Apex source line context'
+  );
 }
 
 function buildExecutionOrderMap(nodes: StoryNode[]): Map<string, number> {
@@ -4589,6 +5000,38 @@ function hasNodeVisualMetrics(node: StoryNode): boolean {
   return soql > 0 || dml > 0 || cpu > 0;
 }
 
+function nodeSourceOwnerLabel(node: StoryNode): string | undefined {
+  if (!['dml', 'soql', 'email'].includes(node.kind)) {
+    return undefined;
+  }
+  const owner = metricText(node.metrics.ownerSignature);
+  if (!owner || (node.callerChain && node.callerChain.length > 0)) {
+    return undefined;
+  }
+  return `source: ${compactApexSignature(owner)}`;
+}
+
+function compactApexSignature(signature: string): string {
+  return friendlyApexLocation(signature)?.replace(/\((.*)\)$/, (match) => (match.length > 38 ? '(...)' : match)) ?? signature;
+}
+
+function buildSourceAttributionPathItems(node: StoryNode): string[] {
+  const rawPath = metricText(node.metrics.sourceAttributionPath);
+  if (!rawPath) {
+    return [];
+  }
+  return rawPath.split('|').map((item) => item.trim()).filter(Boolean);
+}
+
+function dmlObjectInferenceNote(node: StoryNode): string | undefined {
+  if (!node.metrics.objectNameInferred) {
+    return undefined;
+  }
+  const rawObjectName = metricText(node.metrics.rawObjectName) ?? 'SObject';
+  const inferredObjectName = metricText(node.metrics.objectName) ?? node.label.replace(/^\w+\s+/, '');
+  return `Salesforce logged this DML as ${rawObjectName}; ${inferredObjectName} is inferred from the nested trigger/automation that immediately ran after it.`;
+}
+
 function estimateGraphNodeHeight(
   node: StoryNode,
   gapBeforeMs?: number,
@@ -4600,8 +5043,17 @@ function estimateGraphNodeHeight(
   if (node.kind === 'dml') {
     height += 25;
   }
+  if ((node.kind === 'method' || node.kind === 'apex') && node.label.length > 44) {
+    height += 18;
+  }
+  if (nodeSourceOwnerLabel(node)) {
+    height += 30;
+  }
   if (node.loopMultiplier && node.loopMultiplier > 1) {
     height += 12;
+  }
+  if (node.flowDecision) {
+    height += 36;
   }
   if (hasNodeVisualMetrics(node)) {
     height += 20;
@@ -5974,6 +6426,7 @@ function buildExceptionContext(node: StoryNode, nodeById: Map<string, StoryNode>
     ? [...stack].reverse()
     : (node.callerChain ?? []);
   const travelPath = rawTravelPath.filter(isUsefulTravelFrame);
+  const executionPath = buildExecutionPath(node, nodeById);
   const hotspotSource = allNodes
     .filter((candidate) => candidate.kind === 'soql')
     .filter((candidate) => queryExecutionCount(candidate) > 1 || candidate.metrics.attributionConfidence === 'high')
@@ -5986,7 +6439,17 @@ function buildExceptionContext(node: StoryNode, nodeById: Map<string, StoryNode>
     ? 'High confidence: stack + profiling'
     : 'Log evidence';
 
-  return { failingQuery, travelPath, hotspots, confidence };
+  return { failingQuery, travelPath, executionPath, hotspots, confidence };
+}
+
+function buildExecutionPath(node: StoryNode, nodeById: Map<string, StoryNode>): StoryNode[] {
+  return [...getAncestors(node, nodeById)]
+    .reverse()
+    .concat(node)
+    .filter((pathNode) => !isGraphBridgeNode(pathNode))
+    .filter((pathNode) =>
+      ['apex', 'dml', 'trigger', 'flow', 'flowElement', 'method', 'async', 'email', 'callout', 'exception', 'codeUnit'].includes(pathNode.kind)
+    );
 }
 
 function dedupeQueryHotspots(reads: StoryNode[]): StoryNode[] {
@@ -6009,7 +6472,7 @@ function isUsefulTravelFrame(frame: string): boolean {
   return !/^SObjectDomain\./.test(frame);
 }
 
-function buildFlowContext(selectedNode: StoryNode, ancestors: StoryNode[], descendants: StoryNode[]): FlowContext {
+function buildFlowContext(selectedNode: StoryNode, ancestors: StoryNode[], descendants: StoryNode[], nodeById: Map<string, StoryNode>): FlowContext {
   const owningFlow = selectedNode.kind === 'flowElement'
     ? ancestors.find((ancestor) => ancestor.kind === 'flow' && metricText(ancestor.metrics.flowApiName))
     : undefined;
@@ -6021,8 +6484,15 @@ function buildFlowContext(selectedNode: StoryNode, ancestors: StoryNode[], desce
   const flowInterviews = uniqueStoryNodes(
     descendants.filter((node) => node.kind === 'flow' && Boolean(metricText(node.metrics.flowApiName)))
   );
+  const immediateFlowElements = selectedNode.kind === 'flow'
+    ? selectedNode.childIds
+        .map((id) => nodeById.get(id))
+        .filter((node): node is StoryNode => node !== undefined && node.kind === 'flowElement')
+        .sort(compareStoryOrder)
+    : [];
 
   return {
+    currentNodeKind: selectedNode.kind,
     flowApiName,
     runtimeObject,
     interviewId: metricText(selectedNode.metrics.interviewId) ?? metricText(owningFlow?.metrics.interviewId),
@@ -6032,6 +6502,7 @@ function buildFlowContext(selectedNode: StoryNode, ancestors: StoryNode[], desce
     elementApiName: selectedNode.kind === 'flowElement' ? metricText(selectedNode.metrics.apiName) : undefined,
     elementType: selectedNode.kind === 'flowElement' ? metricText(selectedNode.metrics.elementType) : undefined,
     flowNode: selectedNode.kind === 'flow' && flowApiName ? selectedNode : owningFlow,
+    immediateFlowElements,
     flowInterviews
   };
 }
@@ -6052,6 +6523,39 @@ function metricText(value: unknown): string | undefined {
     return undefined;
   }
   return String(value);
+}
+
+function flowDecisionNodeLabel(node: StoryNode): string {
+  const trace = node.flowDecision;
+  if (!trace) {
+    return '';
+  }
+  if (trace.defaultOutcomeInferred) {
+    return trace.nextElementApiName ? `Default path to ${formatFlowDecisionName(trace.nextElementApiName)}` : 'Default path inferred';
+  }
+  if (trace.selectedOutcomeApiName) {
+    return `Took ${formatFlowDecisionName(trace.selectedOutcomeApiName)}`;
+  }
+  if (trace.outcomes.length > 0) {
+    return `${formatNumber(trace.outcomes.length)} outcomes evaluated`;
+  }
+  return 'Decision evaluated';
+}
+
+function flowDecisionTooltip(node: StoryNode): string {
+  const trace = node.flowDecision;
+  if (!trace) {
+    return '';
+  }
+  const selected = trace.defaultOutcomeInferred
+    ? 'Default outcome'
+    : trace.selectedOutcomeApiName ?? 'No selected outcome emitted';
+  const next = trace.nextElementApiName ? `Next: ${trace.nextElementApiName}` : 'No next element emitted';
+  return `${selected}\n${next}\nEvidence lines ${trace.evidenceStartLine}-${trace.evidenceEndLine}`;
+}
+
+function formatFlowDecisionName(value: string): string {
+  return value.replace(/_+/g, ' ').trim();
 }
 
 function indefiniteArticle(value: string): 'a' | 'an' {
@@ -6288,12 +6792,7 @@ function getAncestors(node: StoryNode, nodeById: Map<string, StoryNode>): StoryN
 }
 
 function buildSelectedPath(node: StoryNode, nodeById: Map<string, StoryNode>): StoryNode[] {
-  return [...getAncestors(node, nodeById)]
-    .reverse()
-    .concat(node)
-    .filter((pathNode) => !isGraphBridgeNode(pathNode))
-    .filter((pathNode) => ['apex', 'dml', 'trigger', 'flow', 'flowElement', 'method', 'async', 'email', 'callout', 'exception', 'codeUnit'].includes(pathNode.kind))
-    .slice(-6);
+  return buildExecutionPath(node, nodeById);
 }
 
 function compactPathLabel(node: StoryNode): string {
@@ -6310,8 +6809,8 @@ function explainNode(node: StoryNode, ancestors: StoryNode[], descendants: Story
     const operation = node.metrics.operation ?? 'DML';
     const effects = summarizeEffects(counts);
     const classification = classifyDmlNode(node, ancestors);
-    const methodPath = ancestors
-      .filter((ancestor) => ancestor.kind === 'method')
+    const methodAncestors = ancestors.filter((ancestor) => ancestor.kind === 'method');
+    const methodPath = methodAncestors
       .slice()
       .reverse()
       .map((ancestor) => ancestor.label)
@@ -6319,8 +6818,16 @@ function explainNode(node: StoryNode, ancestors: StoryNode[], descendants: Story
     const sourceContext = methodPath
       ? `${methodPath} inside ${nearestContext?.label ?? 'the transaction'}`
       : nearestContext?.label ?? 'the transaction entry';
+    const sourceContextOnly = methodAncestors.length > 0 && methodAncestors.every((ancestor) => ancestor.metrics.sourceContextOnly);
+    const ownerSignature = metricText(node.metrics.ownerSignature);
     if (classification.isPlatformEvent && classification.isTelemetry) {
       return `${operation} on ${objectName} is classified as platform-event exception logging. It is likely reporting an earlier failure, so use the journey section below to move back to the preceding record DML or exception.`;
+    }
+    if (sourceContextOnly) {
+      return `${operation} on ${objectName} is tied to ${sourceContext}. Salesforce did not emit a real Apex METHOD_ENTRY stack here, so this is source evidence, not a guaranteed direct call chain. Downstream from this DML, the log shows ${effects || 'no additional visible automation'} before control returned.`;
+    }
+    if (ownerSignature && (!node.callerChain || node.callerChain.length === 0)) {
+      return `${operation} on ${objectName} was observed inside ${nearestContext?.label ?? 'the current Salesforce runtime context'}. Profiling points to ${ownerSignature} as source evidence, but Salesforce did not emit a real Apex METHOD_ENTRY stack for the intermediate calls. The graph does not treat that source line as a direct parent-child call. Downstream from this DML, the log shows ${effects || 'no additional visible automation'} before control returned.`;
     }
     return `${operation} on ${objectName} is ${articleFor(classification.label)} ${classification.label} issued by ${sourceContext}. Downstream from this DML, the log shows ${effects || 'no additional visible automation'} before control returned.`;
   }
@@ -6351,6 +6858,11 @@ function explainNode(node: StoryNode, ancestors: StoryNode[], descendants: Story
     return `${node.label} records a ${method} callout to ${endpoint} at line ${node.lineStart}. It is attributed to ${source}, so follow this node when diagnosing integration latency or callout failures.`;
   }
 
+  if (node.kind === 'method' && node.metrics.sourceContextOnly) {
+    const evidence = metricText(node.metrics.evidence) ?? 'log source-line evidence';
+    return `${node.label} is an observed Apex source context inside ${nearestContext?.label ?? 'this code unit'}. Salesforce did not emit a real METHOD_ENTRY for this path, so the graph does not treat this as a proven direct caller. Evidence: ${evidence}.`;
+  }
+
   if (node.kind === 'trigger') {
     const effects = summarizeEffects(counts);
     return `${node.label} is part of the automation chain below ${nearestContext?.label ?? 'the transaction'}. Its visible subtree contains ${effects || 'no DML, SOQL, or nested automation'} in the parsed log.`;
@@ -6370,6 +6882,15 @@ function explainNode(node: StoryNode, ancestors: StoryNode[], descendants: Story
     const elementType = metricText(node.metrics.elementType) ?? 'Flow element';
     const owningFlow = ancestors.find((ancestor) => ancestor.kind === 'flow' && metricText(ancestor.metrics.flowApiName));
     const flowApiName = metricText(owningFlow?.metrics.flowApiName);
+    if (node.flowDecision) {
+      const outcome = node.flowDecision.defaultOutcomeInferred
+        ? 'the default outcome'
+        : node.flowDecision.selectedOutcomeApiName
+          ? `${node.flowDecision.selectedOutcomeApiName}`
+          : 'no selected outcome emitted';
+      const next = node.flowDecision.nextElementApiName ? ` The next executed element was ${node.flowDecision.nextElementApiName}.` : '';
+      return `${elementApiName} is a Flow Decision element${flowApiName ? ` inside ${flowApiName}` : ''}. The log shows ${outcome}.${next}`;
+    }
     return `${elementApiName} is a ${elementType} Flow element${flowApiName ? ` inside ${flowApiName}` : ''}. Use Flow context for the Flow API name and interview id.`;
   }
 
@@ -6722,6 +7243,58 @@ function graphNodeColor(node: StoryNode, isLightTheme?: boolean): string {
   return KIND_STYLE[node.kind].color;
 }
 
+function graphNodeDisplayLabel(node: StoryNode): string {
+  if (node.kind === 'method' && node.metrics.sourceLineContext) {
+    return friendlyApexLocation(graphNodeSignature(node)) ?? node.label;
+  }
+  const parts = parseApexSignatureParts(graphNodeSignature(node));
+  if (parts && (node.kind === 'method' || node.kind === 'apex')) {
+    return `${parts.className}.${parts.method}`;
+  }
+  return parts?.method ?? node.label;
+}
+
+function graphNodeSubtitle(node: StoryNode): string {
+  const parts = parseApexSignatureParts(graphNodeSignature(node));
+  const fallback = nodeSubtitle(node);
+  if (!parts) {
+    return fallback;
+  }
+  if (node.kind === 'method' && node.metrics.sourceContextOnly) {
+    return node.loopMultiplier && node.loopMultiplier > 1
+      ? `Observed source context · ${formatNumber(node.loopMultiplier)} repeats`
+      : 'Observed source context';
+  }
+  if (node.kind === 'apex') {
+    return node.subtitle || 'Apex action';
+  }
+  if (node.kind === 'method') {
+    return node.loopMultiplier && node.loopMultiplier > 1 ? `${formatNumber(node.loopMultiplier)} repeats` : '';
+  }
+  return `${parts.className}${node.loopMultiplier && node.loopMultiplier > 1 ? ` · ${formatNumber(node.loopMultiplier)} repeats` : ''}`;
+}
+
+function graphNodeSignature(node: StoryNode): string {
+  return metricText(node.metrics.signature) ?? node.detail ?? node.label;
+}
+
+function parseApexSignatureParts(signature: string | undefined): { className: string; method: string; params?: string } | undefined {
+  if (!signature) {
+    return undefined;
+  }
+  const clean = signature.replace(/^Class\./, '').replace(/^Trigger\./, '').replace(/:.*$/, '').trim();
+  const match = clean.match(/^([A-Z][A-Za-z0-9_]*(?:\.[A-Z][A-Za-z0-9_]*)*)\.([A-Za-z_][A-Za-z0-9_<>]*)(?:\(([^)]*)\))?$/);
+  if (!match) {
+    return undefined;
+  }
+  const method = match[2] === match[1] ? 'constructor' : match[2];
+  return {
+    className: match[1],
+    method,
+    ...(match[3] !== undefined ? { params: match[3] } : {})
+  };
+}
+
 function nodeSubtitle(node: StoryNode): string {
   const loopText = node.loopMultiplier && node.loopMultiplier > 1 ? ` · ${formatNumber(node.loopMultiplier)} repeats` : '';
   if (node.kind === 'dml') {
@@ -6740,9 +7313,11 @@ function nodeSubtitle(node: StoryNode): string {
     return `${emailType}${status ? ` · ${status}` : ''}${loopText}`;
   }
   if (node.kind === 'callout') {
-    const method = metricText(node.metrics.method) ?? 'HTTP';
-    const status = metricText(node.metrics.statusCode) ?? metricText(node.metrics.status);
-    return `${method}${status ? ` · ${status}` : ''}${loopText}`;
+    const statusCode = metricText(node.metrics.statusCode);
+    return `${statusCode ? `Status ${statusCode}` : 'Request captured'}${loopText}`;
+  }
+  if (node.kind === 'method' && node.metrics.sourceContextOnly) {
+    return `Observed source context${loopText}`;
   }
   if (node.kind === 'flowRuntime') {
     return `Runtime wrapper · ${node.metrics.objectName ?? 'record-triggered'}${loopText}`;
@@ -6753,10 +7328,16 @@ function nodeSubtitle(node: StoryNode): string {
       ? `${formatNumber(interviewCount)} Flow interviews`
       : `${node.metrics.flowApiName ? 'Flow interview' : (node.subtitle || 'Flow interview')}${loopText}`;
   }
+  if (node.flowDecision) {
+    return `Flow decision${loopText}`;
+  }
   return `${node.subtitle || `${node.childIds.length} downstream`}${loopText}`;
 }
 
 function storyKindLabel(node: StoryNode, fallback: string): string {
+  if (node.kind === 'method' && node.metrics.sourceContextOnly) {
+    return 'Source context';
+  }
   if (node.kind === 'async') {
     return 'Async Apex';
   }
@@ -6767,6 +7348,9 @@ function storyKindLabel(node: StoryNode, fallback: string): string {
     return 'Flow interview';
   }
   if (node.kind === 'flowElement') {
+    if (node.metrics.elementType === 'FlowDecision') {
+      return 'Flow decision';
+    }
     return 'Flow element';
   }
   if (node.kind === 'callout') {
